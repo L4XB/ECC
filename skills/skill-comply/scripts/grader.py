@@ -30,23 +30,38 @@ def _check_temporal_order(
     event: ObservationEvent,
     resolved: dict[str, list[ObservationEvent]],
     classified: dict[str, list[ObservationEvent]],
+    graded: set[str],
 ) -> str | None:
     """Check before_step/after_step constraints. Returns failure reason or None."""
     if step.detector.after_step is not None:
-        after_events = resolved.get(step.detector.after_step)
+        after_step = step.detector.after_step
+        after_events = resolved.get(after_step)
         if after_events is None:
-            after_events = classified.get(step.detector.after_step, [])
+            if after_step in graded:
+                # Graded and missing from `resolved` means it failed its own checks.
+                # Its classified events are not evidence for anything: reusing them
+                # here let a dependant pass on the strength of a failed prerequisite,
+                # and the overstatement carried down the whole chain.
+                return f"after_step '{after_step}' did not pass its own checks"
+            # Not graded yet, so this is a forward reference to a step declared later.
+            # The classifier's own output is the only thing available, and using it is
+            # what makes an out-of-order declaration work.
+            after_events = classified.get(after_step, [])
         if not after_events:
-            return f"after_step '{step.detector.after_step}' not yet detected"
+            return f"after_step '{after_step}' not yet detected"
         latest_after = max(e.timestamp for e in after_events)
         if event.timestamp <= latest_after:
             return (
-                f"must occur after '{step.detector.after_step}' "
+                f"must occur after '{after_step}' "
                 f"(last at {latest_after}), but found at {event.timestamp}"
             )
 
     if step.detector.before_step is not None:
-        # Look ahead using LLM classification results
+        # Look ahead using LLM classification results. A failed reference step is NOT
+        # excluded here the way it is above: the two fall in opposite directions. An
+        # `after_step` fallback can only turn a failure into a pass, while a
+        # `before_step` one can only turn a pass into a failure, so dropping it would
+        # relax a constraint because some other step failed.
         before_events = resolved.get(step.detector.before_step)
         if before_events is None:
             before_events = classified.get(step.detector.before_step, [])
@@ -80,6 +95,9 @@ def grade(
 
     # Step 2: Check temporal ordering (deterministic)
     resolved: dict[str, list[ObservationEvent]] = {}
+    # Steps already graded, pass or fail. `resolved` alone cannot tell "failed" from
+    # "not reached yet", and those need opposite answers in `_check_temporal_order`.
+    graded: set[str] = set()
     step_results: list[StepResult] = []
 
     for step in spec.steps:
@@ -88,7 +106,7 @@ def grade(
         failure_reason: str | None = None
 
         for event in candidates:
-            temporal_fail = _check_temporal_order(step, event, resolved, classified)
+            temporal_fail = _check_temporal_order(step, event, resolved, classified, graded)
             if temporal_fail is None:
                 matched.append(event)
                 break
@@ -101,6 +119,7 @@ def grade(
         elif failure_reason is None:
             failure_reason = f"no matching event classified for step '{step.id}'"
 
+        graded.add(step.id)
         step_results.append(StepResult(
             step_id=step.id,
             detected=detected,
