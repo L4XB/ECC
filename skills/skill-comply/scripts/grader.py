@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from scripts.classifier import classify_events
 from scripts.parser import ComplianceSpec, ObservationEvent, Step
@@ -76,6 +76,46 @@ def _check_temporal_order(
     return None
 
 
+def _demote_steps_resting_on_failures(
+    step_results: tuple[StepResult, ...],
+    after_steps: dict[str, str],
+) -> tuple[StepResult, ...]:
+    """Undo passes that rest on an `after_step` which ended up failing.
+
+    A step declared before its prerequisite is graded against the classifier's raw
+    events for that step, because `resolved` has nothing for it yet. That fallback is
+    what makes an out-of-order declaration work, but the prerequisite can go on to
+    fail its own checks, and then the dependant is left passing on evidence that
+    never held. Repeat until nothing changes: demoting one step can invalidate
+    whatever depended on it, whichever order the two were declared in. Demotion only
+    ever removes passes, so the loop terminates.
+    """
+    results = step_results
+    while True:
+        failed = {result.step_id for result in results if not result.detected}
+        demote = {
+            result.step_id
+            for result in results
+            if result.detected and after_steps.get(result.step_id) in failed
+        }
+        if not demote:
+            return results
+        results = tuple(
+            replace(
+                result,
+                detected=False,
+                evidence=(),
+                failure_reason=(
+                    f"after_step '{after_steps[result.step_id]}' "
+                    "did not pass its own checks"
+                ),
+            )
+            if result.step_id in demote
+            else result
+            for result in results
+        )
+
+
 def grade(
     spec: ComplianceSpec,
     trace: list[ObservationEvent],
@@ -119,7 +159,7 @@ def grade(
         elif failure_reason is None:
             failure_reason = f"no matching event classified for step '{step.id}'"
 
-        graded.add(step.id)
+        graded = graded | {step.id}
         step_results.append(StepResult(
             step_id=step.id,
             detected=detected,
@@ -127,8 +167,19 @@ def grade(
             failure_reason=failure_reason if not detected else None,
         ))
 
+    # `graded` catches a prerequisite that had already failed when its dependant was
+    # graded. The other direction needs a second pass: a dependant declared first is
+    # graded against the classifier's raw events for a prerequisite that has not run
+    # yet, and only later does that prerequisite fail.
+    after_steps = {
+        step.id: step.detector.after_step
+        for step in spec.steps
+        if step.detector.after_step is not None
+    }
+    resolved_results = _demote_steps_resting_on_failures(tuple(step_results), after_steps)
+
     required_ids = {s.id for s in spec.steps if s.required}
-    required_steps = [s for s in step_results if s.step_id in required_ids]
+    required_steps = [s for s in resolved_results if s.step_id in required_ids]
     detected_required = sum(1 for s in required_steps if s.detected)
     total_required = len(required_steps)
 
@@ -136,7 +187,7 @@ def grade(
 
     return ComplianceResult(
         spec_id=spec.id,
-        steps=tuple(step_results),
+        steps=resolved_results,
         compliance_rate=compliance_rate,
         recommend_hook_promotion=compliance_rate < spec.threshold_promote_to_hook,
         classification=classification,
