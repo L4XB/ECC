@@ -1545,6 +1545,7 @@ function runTests() {
       expectDestructiveDeny('sh -ec "psql -c \'drop table users\'"', 'sh -ec psql');
       expectDestructiveDeny('env -S \'psql -c "drop table users"\'', 'env -S psql');
       expectDestructiveDeny('env --split-string=\'psql -c "drop table users"\'', 'env --split-string psql');
+      expectDestructiveDeny('env -S \'psql -c\' \'drop table users\'', 'env -S psql with the SQL as a later argument');
       expectDestructiveDeny('env time -f "%E" psql -c "drop table users"', 'env time -f psql');
       expectDestructiveDeny('nice -n 10 psql -c "drop table users"', 'nice psql');
       expectDestructiveDeny('timeout 30 psql -c "drop table users"', 'timeout psql');
@@ -1573,6 +1574,7 @@ function runTests() {
       expectAllow('nice -n 10 psql -c "select 1"', 'nice select');
       expectAllow('timeout 30 git status', 'timeout git status');
       expectAllow('env -S \'psql -c "select 1"\'', 'env -S select');
+      expectAllow('env -S \'echo\' \'; psql -c "drop table users"\'', 'env -S echo with a literal argument');
     })
   )
     passed++;

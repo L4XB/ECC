@@ -533,6 +533,13 @@ function unwrapLeadWrappers(tokens) {
  * @param {string[]} tokens dequoted tokens for one segment
  * @returns {string[]} the command lines, possibly none
  */
+// `env -S` splits only its own argument; later arguments reach the command
+// whole. Escaping every character makes the classifier read each one back as a
+// single literal word, so a `;` inside one cannot become a separator.
+function asLiteralWord(token) {
+  return token === '' ? "''" : token.replace(/[\s\S]/gu, ch => `\\${ch}`);
+}
+
 function envSplitStrings(tokens) {
   const payloads = [];
   for (let i = 0; i < tokens.length; i += 1) {
@@ -540,15 +547,15 @@ function envSplitStrings(tokens) {
     for (let j = i + 1; j < tokens.length; j += 1) {
       const arg = tokens[j];
       if (arg === '-S' || arg === '--split-string') {
-        if (j + 1 < tokens.length) payloads.push(tokens.slice(j + 1).join(' '));
+        if (j + 1 < tokens.length) payloads.push([tokens[j + 1], ...tokens.slice(j + 2).map(asLiteralWord)].join(' '));
         break;
       }
       if (arg.startsWith('--split-string=')) {
-        payloads.push([arg.slice('--split-string='.length), ...tokens.slice(j + 1)].join(' '));
+        payloads.push([arg.slice('--split-string='.length), ...tokens.slice(j + 1).map(asLiteralWord)].join(' '));
         break;
       }
       if (/^-S./.test(arg)) {
-        payloads.push([arg.slice(2), ...tokens.slice(j + 1)].join(' '));
+        payloads.push([arg.slice(2), ...tokens.slice(j + 1).map(asLiteralWord)].join(' '));
         break;
       }
       if (arg === '-u' || arg === '--unset' || arg === '-C' || arg === '--chdir') {
