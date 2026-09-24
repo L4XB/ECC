@@ -1551,6 +1551,12 @@ function runTests() {
       expectDestructiveDeny('timeout 30 psql -c "drop table users"', 'timeout psql');
       expectDestructiveDeny('nohup mysql -e "delete from sessions"', 'nohup mysql');
       expectDestructiveDeny('sudo nice -n 5 timeout -s KILL 30 psql -c "drop table users"', 'stacked runners psql');
+      expectDestructiveDeny('sudo su postgres -c "psql -c \'drop table users\'"', 'sudo su -c psql');
+      expectDestructiveDeny('su - postgres -c "psql -c \'drop table users\'"', 'su - user -c psql');
+      expectDestructiveDeny('su -lc "psql -c \'drop table users\'" postgres', 'su -lc psql');
+      expectDestructiveDeny('su --command="psql -c \'drop table users\'" postgres', 'su --command= psql');
+      expectDestructiveDeny('su postgres -- -c "psql -c \'drop table users\'"', 'su -c after --');
+      expectDestructiveDeny('taskset -c 0 psql -c "drop table users"', 'taskset -c psql');
     })
   )
     passed++;
@@ -1573,6 +1579,8 @@ function runTests() {
       expectAllow('bash -lc "psql -c \'select count(*) from users\'"', 'bash -lc select');
       expectAllow('nice -n 10 psql -c "select 1"', 'nice select');
       expectAllow('timeout 30 git status', 'timeout git status');
+      expectAllow('su postgres -c "psql -c \'select 1\'"', 'su -c select');
+      expectAllow('taskset -c 0 git status', 'taskset git status');
       expectAllow('env -S \'psql -c "select 1"\'', 'env -S select');
       expectAllow('env -S \'echo\' \'; psql -c "drop table users"\'', 'env -S echo with a literal argument');
     })

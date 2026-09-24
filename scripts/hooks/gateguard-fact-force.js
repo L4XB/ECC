@@ -360,6 +360,25 @@ function quoteAwareSegments(input) {
 const SHELL_WRAPPERS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh']);
 
 /**
+ * The command line `su` runs through the target user's shell: the value of
+ * `-c`/`--command`, or of a short-option cluster ending in `c` (`-lc`). `su`
+ * passes the arguments after `--` to that shell, which runs a `-c` there too,
+ * so the scan does not stop at `--`.
+ *
+ * @param {string[]} tokens dequoted tokens for one segment
+ * @param {number} start index of the `su` token
+ * @returns {string|null}
+ */
+function suCommandLine(tokens, start) {
+  for (let i = start + 1; i < tokens.length; i += 1) {
+    const arg = tokens[i];
+    if (arg.startsWith('--command=')) return arg.slice('--command='.length);
+    if (arg === '--command' || /^-[A-Za-z]*c$/.test(arg)) return i + 1 < tokens.length ? tokens[i + 1] : null;
+  }
+  return null;
+}
+
+/**
  * SQL clients whose `-c`/`-e`/positional arguments carry SQL statements.
  * Quoted SQL (e.g. `psql -c "drop table users"`) is invisible to the
  * quote-stripping SQL regex, so it is re-checked here against dequoted
@@ -432,6 +451,7 @@ const RUNNER_PREFIXES = {
   nohup: {},
   setsid: {},
   stdbuf: { valueOptions: ['-i', '-o', '-e', '--input', '--output', '--error'] },
+  taskset: { positionals: 1 },
   time: { valueOptions: ['-f', '--format', '-o', '--output'] },
   timeout: { valueOptions: ['-s', '--signal', '-k', '--kill-after'], positionals: 1 }
 };
@@ -615,6 +635,10 @@ function isDestructiveQuoteAware(raw, depth = 0) {
       if (ci !== -1 && tokens[ci + 1] && isDestructiveQuoteAware(tokens[ci + 1], depth + 1)) {
         return true;
       }
+    }
+    if (base === 'su') {
+      const commandLine = suCommandLine(tokens, wi);
+      if (commandLine && isDestructiveQuoteAware(commandLine, depth + 1)) return true;
     }
   }
   return false;
