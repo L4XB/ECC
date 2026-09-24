@@ -28,7 +28,8 @@ function inlineScript(html) {
 
 // Runs the page script against a stand-in for the few browser APIs it uses:
 // elements looked up by selector, fetch, and a setInterval whose callback the
-// test fires itself.
+// test fires itself. While `hold` is set, a fetch waits in `pending` until the
+// test settles it.
 function openPage(snapshot) {
   const elements = new Map();
   const element = selector => {
@@ -44,17 +45,23 @@ function openPage(snapshot) {
     }
     return elements.get(selector);
   };
-  const page = { online: true, refresh: null, element };
+  const page = { online: true, hold: false, pending: [], refresh: null, element };
   vm.runInNewContext(inlineScript(renderControlPaneHtml()), {
     document: { hidden: false, querySelector: element, querySelectorAll: () => [] },
     window: { location: { href: 'http://127.0.0.1:8765/' } },
     URL,
     Intl,
     console,
-    fetch: async () => {
-      if (!page.online) throw new TypeError('Failed to fetch');
-      return { ok: true, status: 200, statusText: 'OK', json: async () => snapshot };
-    },
+    fetch: () =>
+      new Promise((resolve, reject) => {
+        const reply = {
+          succeed: () => resolve({ ok: true, status: 200, statusText: 'OK', json: async () => snapshot }),
+          fail: () => reject(new TypeError('Failed to fetch'))
+        };
+        if (page.hold) page.pending.push(reply);
+        else if (page.online) reply.succeed();
+        else reply.fail();
+      }),
     setInterval: callback => {
       page.refresh = callback;
     }
@@ -92,12 +99,31 @@ async function runTests() {
       const box = page.element('#app');
       assert.strictEqual(box.hidden, false, 'the failure is shown');
       assert.match(box.textContent, /Live refresh failed\. The data below is from /);
+      assert.ok(box.textContent.includes(String(new Date().getFullYear())), 'the time of the data includes its date');
       assert.match(box.textContent, /Failed to fetch/);
 
       page.online = true;
       page.refresh();
       await settle();
       assert.strictEqual(page.element('#app').hidden, true, 'a successful refresh clears it');
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    await test('a refresh that fails after a newer load succeeded is not reported', async () => {
+      const page = openPage(snapshot);
+      await settle();
+
+      page.hold = true;
+      page.refresh();
+      page.hold = false;
+      page.refresh();
+      await settle();
+      page.pending[0].fail();
+      await settle();
+      assert.strictEqual(page.element('#app').hidden, true, 'the newer data is not marked as stale');
     })
   )
     passed++;
