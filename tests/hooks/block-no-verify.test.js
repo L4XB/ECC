@@ -311,6 +311,29 @@ if (test('blocks each runtime through its own eval flag', () => {
   }
 })) passed++; else failed++;
 
+// awk takes its program as the first operand, without an eval flag, and
+// expect runs a Tcl script given with -c; both can spawn git.
+if (test('blocks a git bypass in awk program source and an expect -c script', () => {
+  for (const command of [
+    "awk 'BEGIN { system(\"git commit --no-verify -m x\") }'",
+    "gawk 'BEGIN { system(\"git push --no-verify\") }' /dev/null",
+    "mawk '{ print | \"git commit -n -m x\" }' input.txt",
+    "expect -c 'spawn git commit --no-verify -m x'",
+    // The payload goes on after the call that runs git.
+    "awk 'BEGIN { system(\"git push --no-verify\") }'",
+    "node -e 'require(\"child_process\").execSync(\"git push --no-verify\"); console.log(\"done\")'",
+  ]) {
+    const r = runHook({ tool_input: { command } });
+    assert.strictEqual(r.code, 2, `expected exit 2 for ${command}, got ${r.code}`);
+  }
+})) passed++; else failed++;
+
+if (test('allows an expect script path whose arguments mention a bypass', () => {
+  const command = "expect release.exp 'git push --no-verify'";
+  const r = runHook({ tool_input: { command } });
+  assert.strictEqual(r.code, 0, `expected exit 0 for ${command}, got ${r.code}: ${r.stderr}`);
+})) passed++; else failed++;
+
 if (test('still allows a bypass phrase in an eval payload that does not run git', () => {
   for (const command of [
     'node -e "console.log(\'use --no-verify only in emergencies\')"',

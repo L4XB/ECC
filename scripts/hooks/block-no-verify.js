@@ -384,7 +384,16 @@ const CODE_EVALUATORS = new Map([
   ['julia', ['-e', '-E']],
   ['elixir', ['-e']],
   ['erl', ['-eval']],
+  ['expect', ['-c']],
 ]);
+
+/**
+ * Runtimes whose first operand is itself program source, with no eval flag:
+ * `awk 'BEGIN { system("git commit --no-verify") }'` runs git. Every quoted
+ * argument they receive stays subject to the guard, at the cost of also
+ * checking an awk pattern that merely mentions a bypass flag.
+ */
+const SOURCE_OPERAND_RUNTIMES = new Set(['awk', 'gawk', 'mawk', 'nawk']);
 
 /**
  * Whether the words between the program and its quoted argument turn that
@@ -412,7 +421,7 @@ function isQuotedDataArgument(input, idx) {
   if (region === null || region.argv0 === '') return false;
   if (region.substitution) return false;
   const base = commandBasename(region.argv0);
-  if (base === 'git' || COMMAND_WRAPPERS.has(base)) return false;
+  if (base === 'git' || COMMAND_WRAPPERS.has(base) || SOURCE_OPERAND_RUNTIMES.has(base)) return false;
   return !evaluatesQuotedArgument(input, region, base);
 }
 
@@ -535,11 +544,13 @@ function isNoVerifyLongFlag(value) {
 /**
  * A flag inside a code payload is followed by the punctuation that closes the
  * call (`execSync("git push --no-verify")`), and the word tokenizer keeps that
- * punctuation in the token. Trim it so the flag is comparable; a real flag
- * never ends in one of these characters.
+ * punctuation in the token. When the payload goes on after the call, the
+ * closing quote reads to the tokenizer as an opening one, and the rest of the
+ * payload lands in the same token (`system("git push --no-verify") }`). Keep
+ * the part before the first such character; a real flag contains none.
  */
 function flagToken(value) {
-  return value.replace(/[)\]}'"`;,]+$/, '');
+  return value.replace(/[)\]}'"`;,\s][\s\S]*$/, '');
 }
 
 /**
