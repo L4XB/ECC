@@ -82,10 +82,8 @@ const COMMAND_WRAPPERS = new Set([
   'npx',
   'bunx',
   'pnpx',
-  // Run a command for each file or input line: find -exec, fd -x, parallel.
-  'find',
-  'fd',
-  'fdfind',
+  // Runs a command line for each input line; find and fd, which do so only
+  // after one of their exec flags, are in CODE_EVALUATORS.
   'parallel',
 ]);
 
@@ -390,6 +388,10 @@ const CODE_EVALUATORS = new Map([
   ['elixir', ['-e']],
   ['erl', ['-eval']],
   ['expect', ['-c']],
+  // Launchers that run a command given after one of their flags.
+  ['find', ['-exec', '-execdir', '-ok', '-okdir']],
+  ['fd', ['-x', '--exec', '-X', '--exec-batch']],
+  ['fdfind', ['-x', '--exec', '-X', '--exec-batch']],
 ]);
 
 /**

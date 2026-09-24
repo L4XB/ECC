@@ -325,6 +325,19 @@ if (test('blocks a quoted git command line run by find, fd or parallel', () => {
   }
 })) passed++; else failed++;
 
+// Without one of their exec flags, find and fd only search for or print a
+// quoted operand.
+if (test('allows a bypass phrase that find or fd only searches for or prints', () => {
+  for (const command of [
+    "find . -name 'git commit --no-verify'",
+    "find . -type f -printf 'git push --no-verify %p\\n'",
+    "fd 'git push --no-verify' docs",
+  ]) {
+    const r = runHook({ tool_input: { command } });
+    assert.strictEqual(r.code, 0, `expected exit 0 for ${command}, got ${r.code}: ${r.stderr}`);
+  }
+})) passed++; else failed++;
+
 // awk takes its program as the first operand, without an eval flag, and
 // expect runs a Tcl script given with -c; both can spawn git.
 if (test('blocks a git bypass in awk program source and an expect -c script', () => {
