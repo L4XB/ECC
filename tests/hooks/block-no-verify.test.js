@@ -311,6 +311,20 @@ if (test('blocks each runtime through its own eval flag', () => {
   }
 })) passed++; else failed++;
 
+// find, fd and parallel run a command line of their own for each file or
+// input line; a quoted git handed to them runs for real.
+if (test('blocks a quoted git command line run by find, fd or parallel', () => {
+  for (const command of [
+    "find . -exec sh -c 'git commit --no-verify -m x' \\;",
+    "find . -name '*.md' -execdir bash -c 'git push --no-verify' \\;",
+    "fd -e md -x sh -c 'git commit -n -m x'",
+    "parallel 'git push --no-verify {}' ::: origin upstream",
+  ]) {
+    const r = runHook({ tool_input: { command } });
+    assert.strictEqual(r.code, 2, `expected exit 2 for ${command}, got ${r.code}`);
+  }
+})) passed++; else failed++;
+
 // awk takes its program as the first operand, without an eval flag, and
 // expect runs a Tcl script given with -c; both can spawn git.
 if (test('blocks a git bypass in awk program source and an expect -c script', () => {

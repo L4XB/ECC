@@ -82,6 +82,11 @@ const COMMAND_WRAPPERS = new Set([
   'npx',
   'bunx',
   'pnpx',
+  // Run a command for each file or input line: find -exec, fd -x, parallel.
+  'find',
+  'fd',
+  'fdfind',
+  'parallel',
 ]);
 
 // Git config section and variable names are case-insensitive
