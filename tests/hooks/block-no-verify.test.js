@@ -355,12 +355,59 @@ if (test('allows a bypass phrase that a program run by find or fd searches for',
   }
 })) passed++; else failed++;
 
-// A program named by an expansion is only known when the line runs.
+// Printed text piped into something that runs what it reads is a command line.
+if (test('blocks a quoted git piped into a program that runs what it reads', () => {
+  for (const command of [
+    "echo 'git commit --no-verify -m x' | sh",
+    "printf '%s\\n' 'git push --no-verify' | bash -s",
+    "{ echo 'git commit --no-verify -m x'; } | sh",
+    "echo 'git push --no-verify' | xargs -I{} sh -c '{}'",
+    "echo 'require(\"child_process\").execSync(\"git push --no-verify\")' | node",
+    "echo 'git commit --no-verify -m x' |& sh",
+    "echo 'git commit --no-verify -m x' | $SHELL",
+    "echo 'git push --no-verify' | FOO=1 sh",
+  ]) {
+    const r = runHook({ tool_input: { command } });
+    assert.strictEqual(r.code, 2, `expected exit 2 for ${command}, got ${r.code}`);
+  }
+})) passed++; else failed++;
+
+if (test('allows a bypass phrase piped into a program that reads it as text', () => {
+  for (const command of [
+    "echo 'git commit --no-verify' | grep -c verify",
+    "printf '%s' 'git push --no-verify' | node /tmp/x.js",
+    "grep -q 'git commit --no-verify' notes.md || sh setup.sh",
+  ]) {
+    const r = runHook({ tool_input: { command } });
+    assert.strictEqual(r.code, 0, `expected exit 0 for ${command}, got ${r.code}: ${r.stderr}`);
+  }
+})) passed++; else failed++;
+
+// A program named by an expansion is only known when the line runs, and a
+// substitution runs or sources the text it produces.
 if (test('blocks a quoted git whose program is known only at run time', () => {
   for (const command of [
     "$SHELL -c 'git commit --no-verify -m x'",
     "\"$SHELL\" -c 'git commit --no-verify -m x'",
+    "$(command -v sh) -c 'git commit --no-verify -m x'",
+    "`command -v bash` -c 'git push --no-verify'",
     "find . -exec $SHELL -c 'git commit --no-verify -m x' \\;",
+    "$(echo 'git commit --no-verify -m x')",
+    "source <(echo 'git commit --no-verify -m x')",
+    ". <(printf '%s' 'git push --no-verify')",
+  ]) {
+    const r = runHook({ tool_input: { command } });
+    assert.strictEqual(r.code, 2, `expected exit 2 for ${command}, got ${r.code}`);
+  }
+})) passed++; else failed++;
+
+if (test('blocks a quoted git that a shell builtin runs or keeps to run', () => {
+  for (const command of [
+    "builtin eval 'git commit --no-verify -m x'",
+    "trap 'git push --no-verify' EXIT",
+    "noglob sh -c 'git commit --no-verify -m x'",
+    "nocorrect sh -c 'git push --no-verify'",
+    "alias gc='git commit --no-verify -m x'",
   ]) {
     const r = runHook({ tool_input: { command } });
     assert.strictEqual(r.code, 2, `expected exit 2 for ${command}, got ${r.code}`);

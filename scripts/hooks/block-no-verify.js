@@ -15,7 +15,7 @@
 
 'use strict';
 
-const { quotedRegionAt } = require('../lib/shell-quotes');
+const { quotedRegionAt, ASSIGNMENT_WORD } = require('../lib/shell-quotes');
 
 const MAX_STDIN = 1024 * 1024;
 let raw = '';
@@ -85,6 +85,13 @@ const COMMAND_WRAPPERS = new Set([
   // Runs a command line for each input line; find and fd, which do so only
   // after one of their exec flags, are in LAUNCHERS.
   'parallel',
+  // Shell builtins and zsh precommand modifiers that run a command line, or
+  // keep one to run later (`trap '...' EXIT`, `alias x='...'`).
+  'builtin',
+  'noglob',
+  'nocorrect',
+  'trap',
+  'alias',
 ]);
 
 // Git config section and variable names are case-insensitive
@@ -442,18 +449,75 @@ function receivesAsData(words) {
 }
 
 /**
+ * Whether a statement's first word sits right inside or right after a
+ * substitution. `$(echo '...')` runs what echo prints, `source <(echo '...')`
+ * reads it as a script, and in `$(command -v sh) -c '...'` the program is only
+ * known when the line runs.
+ */
+function startsAtSubstitution(input, argv0Start) {
+  let i = argv0Start - 1;
+  while (i >= 0 && /\s/.test(input.charAt(i))) i--;
+  const char = input.charAt(i);
+  if (char === '`' || char === ')') return true;
+  return char === '(' && /[$<>]/.test(input.charAt(i - 1));
+}
+
+/**
+ * Whether a program reads the text piped into it as code: a shell or command
+ * wrapper (`| sh`, `| xargs sh -c`), a runtime with no script operand of its
+ * own (`| node`, `| python3 -`), or a program named by an expansion.
+ */
+function readsCodeFromStdin(words) {
+  if (/[$`]/.test(words[0])) return true;
+  const base = commandBasename(words[0]);
+  if (COMMAND_WRAPPERS.has(base)) return true;
+  if (CODE_EVALUATORS.has(base)) return words.slice(1).every((word) => word.startsWith('-'));
+  return false;
+}
+
+/**
+ * Whether a later part of the command line pipes into a program that reads
+ * what it receives as code (`echo '...' | sh`). Every later pipe counts, not
+ * only the rest of this pipeline, so a group such as `{ echo '...'; } | sh`
+ * is covered as well.
+ */
+function pipesIntoCodeReader(input, from) {
+  let pos = from;
+  while (pos < input.length) {
+    const end = findCommandSegmentEnd(input, pos);
+    if (end >= input.length) return false;
+    pos = end + 1;
+    if (input.charAt(end) !== '|') continue;
+    if (input.charAt(pos) === '|') {
+      pos += 1;
+      continue;
+    }
+    if (input.charAt(pos) === '&') pos += 1;
+    const words = tokenizeShellWords(input, pos, findCommandSegmentEnd(input, pos))
+      .map((token) => token.value)
+      .filter((word) => !ASSIGNMENT_WORD.test(word));
+    if (words.length > 0 && readsCodeFromStdin(words)) return true;
+  }
+  return false;
+}
+
+/**
  * A `git` inside a quoted string is only a command when that string is
  * handed to something that executes it: a shell or process wrapper, or a
  * runtime given an eval flag. Otherwise it is an argument of an unrelated
  * program (a CLI under test, printf, grep, a script path, ...) and must not
  * be inspected for bypass flags. A double-quoted string that contains a
  * command substitution (`"$(git ...)"`, "`git ...`") runs git before any
- * program receives it, so it is never data.
+ * program receives it, so it is never data. Nor is a string whose program
+ * prints it into something that runs it: a pipe into a shell, or a
+ * substitution whose output is run or sourced.
  */
 function isQuotedDataArgument(input, idx) {
   const region = quotedRegionAt(input, idx);
   if (region === null || region.argv0 === '') return false;
   if (region.substitution) return false;
+  if (startsAtSubstitution(input, region.argv0Start)) return false;
+  if (pipesIntoCodeReader(input, region.end + 1)) return false;
   const words = input.slice(region.argv0Start, region.start).split(/\s+/).filter(Boolean);
   return receivesAsData([region.argv0, ...words.slice(1)]);
 }

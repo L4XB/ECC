@@ -218,4 +218,4 @@ function quotedRegionAt(input, idx) {
   return null;
 }
 
-module.exports = { quotedRegions, quotedRegionAt, SHELL_RESERVED_WORDS };
+module.exports = { quotedRegions, quotedRegionAt, SHELL_RESERVED_WORDS, ASSIGNMENT_WORD };
