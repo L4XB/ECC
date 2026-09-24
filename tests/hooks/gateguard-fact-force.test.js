@@ -1556,6 +1556,8 @@ function runTests() {
       expectDestructiveDeny('su -lc "psql -c \'drop table users\'" postgres', 'su -lc psql');
       expectDestructiveDeny('su --command="psql -c \'drop table users\'" postgres', 'su --command= psql');
       expectDestructiveDeny('su postgres -- -c "psql -c \'drop table users\'"', 'su -c after --');
+      expectDestructiveDeny('su postgres -c "echo ok" -c "psql -c \'drop table users\'"', 'su runs its last -c');
+      expectDestructiveDeny('su -c "psql -c \'drop table users\'" -c "echo ok" postgres', 'su -c with a later harmless -c');
       expectDestructiveDeny('taskset -c 0 psql -c "drop table users"', 'taskset -c psql');
     })
   )

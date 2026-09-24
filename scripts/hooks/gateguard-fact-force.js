@@ -360,22 +360,28 @@ function quoteAwareSegments(input) {
 const SHELL_WRAPPERS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh']);
 
 /**
- * The command line `su` runs through the target user's shell: the value of
- * `-c`/`--command`, or of a short-option cluster ending in `c` (`-lc`). `su`
- * passes the arguments after `--` to that shell, which runs a `-c` there too,
- * so the scan does not stop at `--`.
+ * The command lines `su` may run through the target user's shell: the value of
+ * every `-c`/`--command`, or of a short-option cluster ending in `c` (`-lc`).
+ * `su` runs only the last one, so each is checked rather than guessing which
+ * wins. `su` passes the arguments after `--` to that shell, which runs a `-c`
+ * there too, so the scan does not stop at `--`.
  *
  * @param {string[]} tokens dequoted tokens for one segment
  * @param {number} start index of the `su` token
- * @returns {string|null}
+ * @returns {string[]}
  */
-function suCommandLine(tokens, start) {
+function suCommandLines(tokens, start) {
+  const commandLines = [];
   for (let i = start + 1; i < tokens.length; i += 1) {
     const arg = tokens[i];
-    if (arg.startsWith('--command=')) return arg.slice('--command='.length);
-    if (arg === '--command' || /^-[A-Za-z]*c$/.test(arg)) return i + 1 < tokens.length ? tokens[i + 1] : null;
+    if (arg.startsWith('--command=')) {
+      commandLines.push(arg.slice('--command='.length));
+    } else if ((arg === '--command' || /^-[A-Za-z]*c$/.test(arg)) && i + 1 < tokens.length) {
+      commandLines.push(tokens[i + 1]);
+      i += 1;
+    }
   }
-  return null;
+  return commandLines;
 }
 
 /**
@@ -637,8 +643,9 @@ function isDestructiveQuoteAware(raw, depth = 0) {
       }
     }
     if (base === 'su') {
-      const commandLine = suCommandLine(tokens, wi);
-      if (commandLine && isDestructiveQuoteAware(commandLine, depth + 1)) return true;
+      for (const commandLine of suCommandLines(tokens, wi)) {
+        if (isDestructiveQuoteAware(commandLine, depth + 1)) return true;
+      }
     }
   }
   return false;
