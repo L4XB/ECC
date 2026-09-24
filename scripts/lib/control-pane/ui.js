@@ -436,6 +436,15 @@ function renderControlPaneHtml() {
       target.textContent = '';
     }
 
+    // The board keeps the last snapshot on screen, so a failed refresh has to
+    // say that the data is no longer live, and since when.
+    function showRefreshFailure(error) {
+      const since = state.loadedAt
+        ? ' The data below is from ' + state.loadedAt.toLocaleTimeString() + '.'
+        : '';
+      showError('#app', 'Live refresh failed.' + since + '\\n' + formatError(error));
+    }
+
     async function readJsonResponse(response) {
       let payload;
       try {
@@ -642,6 +651,7 @@ function renderControlPaneHtml() {
         ...action,
         executable: snapshot.execution.allowActions && action.executable
       })));
+      state.loadedAt = new Date();
       clearError('#app');
     }
 
@@ -682,7 +692,7 @@ function renderControlPaneHtml() {
     // Live board: refresh on a gentle interval; pause while a prompt/tab is hidden.
     setInterval(() => {
       if (document.hidden) return;
-      load().catch(() => {});
+      load().catch(showRefreshFailure);
     }, 15000);
 
     load().catch(error => showError('#app', error));
