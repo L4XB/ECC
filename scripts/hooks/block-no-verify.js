@@ -83,7 +83,7 @@ const COMMAND_WRAPPERS = new Set([
   'bunx',
   'pnpx',
   // Runs a command line for each input line; find and fd, which do so only
-  // after one of their exec flags, are in CODE_EVALUATORS.
+  // after one of their exec flags, are in LAUNCHERS.
   'parallel',
 ]);
 
@@ -388,11 +388,22 @@ const CODE_EVALUATORS = new Map([
   ['elixir', ['-e']],
   ['erl', ['-eval']],
   ['expect', ['-c']],
-  // Launchers that run a command given after one of their flags.
+]);
+
+/**
+ * Launchers that run another program given after one of their flags:
+ * `find . -exec CMD ARGS \;`, `fd -x CMD ARGS`. A quoted argument of the
+ * launched program is judged as that program's own, so `-exec grep '...'`
+ * searches and `-exec sh -c '...'` runs. After find's `;` or `{} +` the
+ * arguments are find's again.
+ */
+const LAUNCHERS = new Map([
   ['find', ['-exec', '-execdir', '-ok', '-okdir']],
   ['fd', ['-x', '--exec', '-X', '--exec-batch']],
   ['fdfind', ['-x', '--exec', '-X', '--exec-batch']],
 ]);
+
+const EXEC_TERMINATORS = new Set(['\\;', "';'", '";"']);
 
 /**
  * Runtimes whose first operand is itself program source, with no eval flag:
@@ -403,15 +414,31 @@ const CODE_EVALUATORS = new Map([
 const SOURCE_OPERAND_RUNTIMES = new Set(['awk', 'gawk', 'mawk', 'nawk']);
 
 /**
- * Whether the words between the program and its quoted argument turn that
- * argument into code. A flag is matched as a whole word, or as the `=` form
- * of itself, so a path that happens to end in one of them cannot qualify.
+ * Whether a quoted argument is data for the program that receives it.
+ * `words` runs from that program's name up to the argument. An eval flag is
+ * matched as a whole word, or as the `=` form of itself, so a path that
+ * happens to end in one of them cannot qualify.
  */
-function evaluatesQuotedArgument(input, region, base) {
+function receivesAsData(words) {
+  // A program named by an expansion is only known when the line runs.
+  if (/[$`]/.test(words[0])) return false;
+  const base = commandBasename(words[0]);
+  if (base === 'git' || COMMAND_WRAPPERS.has(base) || SOURCE_OPERAND_RUNTIMES.has(base)) return false;
+  const launchFlags = LAUNCHERS.get(base);
+  if (launchFlags !== undefined) {
+    const at = words.findLastIndex((word) => launchFlags.includes(word));
+    if (at === -1) return true;
+    const launched = words.slice(at + 1);
+    if (launched.some((word, i) => EXEC_TERMINATORS.has(word) || (word === '+' && launched[i - 1] === '{}'))) {
+      return true;
+    }
+    // The quoted argument is the launched program's name itself.
+    if (launched.length === 0) return false;
+    return receivesAsData([launched[0].replace(/['"\\]/g, ''), ...launched.slice(1)]);
+  }
   const flags = CODE_EVALUATORS.get(base);
-  if (flags === undefined) return false;
-  const words = input.slice(region.argv0Start, region.start).split(/\s+/);
-  return words.some((word) => flags.some((flag) => word === flag || word.startsWith(`${flag}=`)));
+  if (flags === undefined) return true;
+  return !words.some((word) => flags.some((flag) => word === flag || word.startsWith(`${flag}=`)));
 }
 
 /**
@@ -427,9 +454,8 @@ function isQuotedDataArgument(input, idx) {
   const region = quotedRegionAt(input, idx);
   if (region === null || region.argv0 === '') return false;
   if (region.substitution) return false;
-  const base = commandBasename(region.argv0);
-  if (base === 'git' || COMMAND_WRAPPERS.has(base) || SOURCE_OPERAND_RUNTIMES.has(base)) return false;
-  return !evaluatesQuotedArgument(input, region, base);
+  const words = input.slice(region.argv0Start, region.start).split(/\s+/).filter(Boolean);
+  return receivesAsData([region.argv0, ...words.slice(1)]);
 }
 
 /**

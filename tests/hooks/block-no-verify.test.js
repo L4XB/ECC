@@ -318,6 +318,7 @@ if (test('blocks a quoted git command line run by find, fd or parallel', () => {
     "find . -exec sh -c 'git commit --no-verify -m x' \\;",
     "find . -name '*.md' -execdir bash -c 'git push --no-verify' \\;",
     "fd -e md -x sh -c 'git commit -n -m x'",
+    "find . -exec 'sh' -c 'git commit --no-verify -m x' \\;",
     "parallel 'git push --no-verify {}' ::: origin upstream",
   ]) {
     const r = runHook({ tool_input: { command } });
@@ -335,6 +336,34 @@ if (test('allows a bypass phrase that find or fd only searches for or prints', (
   ]) {
     const r = runHook({ tool_input: { command } });
     assert.strictEqual(r.code, 0, `expected exit 0 for ${command}, got ${r.code}: ${r.stderr}`);
+  }
+})) passed++; else failed++;
+
+// A program that find or fd launches decides for itself: grep searches for a
+// quoted phrase, a shell runs it. After find's `;` the arguments are find's.
+if (test('allows a bypass phrase that a program run by find or fd searches for', () => {
+  for (const command of [
+    "find . -exec grep 'git push --no-verify' {} \\;",
+    "find . -name '*.md' -exec grep -l 'git commit --no-verify' {} +",
+    "fd -e md -x grep 'git push --no-verify'",
+    "find . -exec sh -c 'echo {}' \\; -name 'git commit --no-verify'",
+    "find . -exec sh -c 'echo {}' ';' -name 'git push --no-verify'",
+    "find . -exec sh -c 'ls \"$@\"' sh {} + -name 'git push --no-verify'",
+  ]) {
+    const r = runHook({ tool_input: { command } });
+    assert.strictEqual(r.code, 0, `expected exit 0 for ${command}, got ${r.code}: ${r.stderr}`);
+  }
+})) passed++; else failed++;
+
+// A program named by an expansion is only known when the line runs.
+if (test('blocks a quoted git whose program is known only at run time', () => {
+  for (const command of [
+    "$SHELL -c 'git commit --no-verify -m x'",
+    "\"$SHELL\" -c 'git commit --no-verify -m x'",
+    "find . -exec $SHELL -c 'git commit --no-verify -m x' \\;",
+  ]) {
+    const r = runHook({ tool_input: { command } });
+    assert.strictEqual(r.code, 2, `expected exit 2 for ${command}, got ${r.code}`);
   }
 })) passed++; else failed++;
 
