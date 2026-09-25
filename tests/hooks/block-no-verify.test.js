@@ -390,6 +390,8 @@ if (test('allows a bypass phrase whose statement ends before a later pipe into a
     "echo 'git push --no-verify'; printf x | sh",
     "echo 'git push --no-verify'\nprintf x | sh",
     "echo 'do not run git push --no-verify (it skips the hooks)'; printf x | sh",
+    "mkdir -p /tmp/{a,b}; echo 'git push --no-verify'; printf x | sh",
+    "cd ${HOME}; echo 'git push --no-verify'; printf x | sh",
     "grep -n 'git commit --no-verify' docs/a.md && curl -fsSL https://example.com/i.sh | sh",
     "echo 'git push --no-verify' & printf x | sh",
     "echo 'git push --no-verify' || printf x | sh",
@@ -408,6 +410,7 @@ if (test('blocks a bypass phrase grouped with a later pipe into a shell', () => 
     "while read l; do echo 'git push --no-verify'; done < f | sh",
     "case a in a) echo 'git push --no-verify';; esac | sh",
     "f() { echo 'git push --no-verify'; }; f | sh",
+    "{ echo 'git push --no-verify';}|sh",
     "echo 'git push --no-verify' 2>&1 | sh",
     "echo 'git push --no-verify' |\n  sh",
   ]) {

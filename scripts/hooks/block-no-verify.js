@@ -494,7 +494,9 @@ function endsStatement(input, i) {
  * output of a finished statement into a later pipe: a brace group or
  * subshell (`{ echo '...'; } | sh`), a function body called later on, a
  * compound command (`if ...; fi | sh`) or a substitution. Quoted text does
- * not count.
+ * not count, and neither does a brace inside a word, which is brace or
+ * parameter expansion (`/tmp/{a,b}`, `${HOME}`): a brace group opens with
+ * `{` as a word of its own.
  */
 function mayGroupStatements(input, end) {
   let bare = '';
@@ -505,7 +507,7 @@ function mayGroupStatements(input, end) {
     pos = region.end + 1;
   }
   bare += input.slice(pos, end);
-  return /[{}()`]/.test(bare) || bare.split(/[\s;&|]+/).some((word) => SHELL_RESERVED_WORDS.has(word));
+  return /[()`]/.test(bare) || bare.split(/[\s;&|]+/).some((word) => SHELL_RESERVED_WORDS.has(word));
 }
 
 /**
