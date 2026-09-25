@@ -462,15 +462,91 @@ function startsAtSubstitution(input, argv0Start) {
   return char === '(' && /[$<>]/.test(input.charAt(i - 1));
 }
 
+const SED_PROGRAMS = new Set(['sed', 'gsed']);
+
+/**
+ * Where a sed command letter can stand: the start of the script, or after a
+ * separator, a block brace, a negation or an address.
+ */
+const SED_COMMAND_START = /[\s;{}!$0-9/]/;
+
+/**
+ * One part of a sed `s` command, from `start` up to the next unescaped
+ * `delimiter`. An escaped delimiter stands for itself.
+ */
+function sedPart(script, start, delimiter) {
+  let text = '';
+  for (let i = start; i < script.length; i++) {
+    const char = script[i];
+    if (char === '\\' && i + 1 < script.length) {
+      text += script[i + 1] === delimiter ? delimiter : char + script[i + 1];
+      i++;
+      continue;
+    }
+    if (char === delimiter) return { text, end: i };
+    text += char;
+  }
+  return null;
+}
+
+/**
+ * What a sed script runs through a shell, as far as its text shows it (GNU
+ * sed). An `s` command with the `e` flag runs the pattern space once the
+ * replacement is made, and an `e` command runs its argument, or the pattern
+ * space when it has none. `commands` holds the command text the script itself
+ * supplies; `runsInput` says the text sed reads is run too.
+ */
+function sedExecution(script) {
+  const commands = [];
+  let runsInput = false;
+  for (let i = 0; i < script.length; i++) {
+    const letter = script[i];
+    if (letter !== 's' && letter !== 'e') continue;
+    if (i > 0 && !SED_COMMAND_START.test(script[i - 1])) continue;
+    if (letter === 'e') {
+      const command = /^e(?:[ \t]+([^\n]+)|[ \t]*(?=[\n;}]|$))/.exec(script.slice(i));
+      if (!command) continue;
+      if (command[1] === undefined) runsInput = true;
+      else commands.push(command[1]);
+      continue;
+    }
+    const delimiter = script[i + 1];
+    if (!delimiter || /[\w\s\\]/.test(delimiter)) continue;
+    const pattern = sedPart(script, i + 2, delimiter);
+    const replacement = pattern && sedPart(script, pattern.end + 1, delimiter);
+    if (!replacement) continue;
+    const flags = /^[gpiImMe0-9]*/.exec(script.slice(replacement.end + 1))[0];
+    if (flags.includes('e')) {
+      commands.push(replacement.text);
+      runsInput = true;
+    }
+    i = replacement.end + flags.length;
+  }
+  return { commands, runsInput };
+}
+
+/**
+ * The commands the sed scripts in `input` run, taken from each quoted script
+ * whose statement is sed. A script that only mentions a bypass flag, in a
+ * pattern or a replacement it does not run, adds nothing.
+ */
+function sedExecutedCommands(input) {
+  return quotedRegions(input)
+    .filter((region) => SED_PROGRAMS.has(commandBasename(region.argv0)))
+    .flatMap((region) => sedExecution(input.slice(region.start + 1, region.end)).commands);
+}
+
 /**
  * Whether a program reads the text piped into it as code: a shell or command
  * wrapper (`| sh`, `| xargs sh -c`), a runtime with no script operand of its
- * own (`| node`, `| python3 -`), or a program named by an expansion.
+ * own (`| node`, `| python3 -`), sed with a script that runs its input
+ * (`| sed e`), or a program named by an expansion.
  */
 function readsCodeFromStdin(words) {
   if (/[$`]/.test(words[0])) return true;
   const base = commandBasename(words[0]);
   if (COMMAND_WRAPPERS.has(base)) return true;
+  if (SED_PROGRAMS.has(base)) return words.slice(1).some((word) => sedExecution(word).runsInput);
   if (CODE_EVALUATORS.has(base)) return words.slice(1).every((word) => word.startsWith('-'));
   return false;
 }
@@ -774,6 +850,14 @@ function hasHooksPathOverride(input, detected) {
  * Check a command string for git hook bypass attempts.
  */
 function checkCommand(input) {
+  // sed runs these through a shell, and inside its script they are glued to
+  // the delimiters (`s/x/git push --no-verify/e`), so they are checked as the
+  // command lines they are.
+  for (const command of sedExecutedCommands(input)) {
+    const result = checkCommand(command);
+    if (result.blocked) return result;
+  }
+
   let start = 0;
 
   while (start < input.length) {

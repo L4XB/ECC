@@ -452,6 +452,39 @@ if (test('blocks a quoted git that a shell builtin runs or keeps to run', () => 
 
 // awk takes its program as the first operand, without an eval flag, and
 // expect runs a Tcl script given with -c; both can spawn git.
+// GNU sed runs a command line through a shell for an `s` command with the `e`
+// flag and for an `e` command, so what those run is checked, while a sed
+// script that only mentions a bypass flag stays data.
+if (test('blocks a git bypass that a sed script runs', () => {
+  for (const command of [
+    "printf x | sed 's/x/git commit --no-verify/e'",
+    "printf x | sed -e 's/x/git commit --no-verify/e'",
+    "printf x | sed --expression='s/x/git push --no-verify/e'",
+    "printf x | sed 's|x|git push --no-verify|e'",
+    "printf x | sed 'e git commit --no-verify'",
+    "echo 'git push --no-verify' | sed e",
+    "echo 'git push --no-verify' | sed 's/^//e'",
+  ]) {
+    const r = runHook({ tool_input: { command } });
+    assert.strictEqual(r.code, 2, `expected exit 2 for ${command}, got ${r.code}`);
+  }
+})) passed++; else failed++;
+
+if (test('allows a sed script that only mentions a bypass flag', () => {
+  for (const command of [
+    "sed -i 's/git commit --no-verify/git commit/' notes.md",
+    "sed -n '/git push --no-verify/p' docs/hooks.md",
+    "echo 'git push --no-verify' | sed 's/push/pull/'",
+    "printf x | sed 's/x/git status/e'",
+    "sed -i 's/use git commit --no-verify here/use git commit here/' README.md",
+    "sed -n '/use git commit --no-verify here/p' README.md",
+    "grep -F 's/x/git push --no-verify/e' notes.md",
+  ]) {
+    const r = runHook({ tool_input: { command } });
+    assert.strictEqual(r.code, 0, `expected exit 0 for ${command}, got ${r.code}: ${r.stderr}`);
+  }
+})) passed++; else failed++;
+
 if (test('blocks a git bypass in awk program source and an expect -c script', () => {
   for (const command of [
     "awk 'BEGIN { system(\"git commit --no-verify -m x\") }'",
