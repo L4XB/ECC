@@ -129,6 +129,26 @@ async function runTests() {
     passed++;
   else failed++;
 
+  if (
+    await test('a refresh that fails after an older one succeeded is reported', async () => {
+      const page = openPage(snapshot);
+      await settle();
+
+      page.hold = true;
+      page.refresh();
+      page.refresh();
+      page.pending[0].succeed();
+      await settle();
+      page.pending[1].fail();
+      await settle();
+      const box = page.element('#app');
+      assert.strictEqual(box.hidden, false, 'the latest refresh failed, so the board is not live');
+      assert.match(box.textContent, /Live refresh failed\. The data below is from /);
+    })
+  )
+    passed++;
+  else failed++;
+
   console.log(`\nResults: Passed: ${passed}, Failed: ${failed}`);
   process.exit(failed > 0 ? 1 : 0);
 }

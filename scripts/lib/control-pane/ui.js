@@ -439,6 +439,10 @@ function renderControlPaneHtml() {
     // The board keeps the last snapshot on screen, so a failed refresh has to
     // say that the data is no longer live, and since when.
     let loadedAt = null;
+    // Loads are numbered as they start, so a failed refresh can tell whether
+    // the board already shows data from a load that started after it.
+    let loadsStarted = 0;
+    let shownLoad = 0;
     function showRefreshFailure(error) {
       const since = loadedAt
         ? ' The data below is from ' + loadedAt.toLocaleString() + '.'
@@ -635,6 +639,7 @@ function renderControlPaneHtml() {
     }
 
     async function load() {
+      const id = ++loadsStarted;
       const url = new URL('/api/snapshot', window.location.href);
       if (state.query) url.searchParams.set('query', state.query);
       const response = await fetch(url);
@@ -653,6 +658,7 @@ function renderControlPaneHtml() {
         executable: snapshot.execution.allowActions && action.executable
       })));
       loadedAt = new Date();
+      shownLoad = id;
       clearError('#app');
     }
 
@@ -693,11 +699,14 @@ function renderControlPaneHtml() {
     // Live board: refresh on a gentle interval; pause while a prompt/tab is hidden.
     setInterval(() => {
       if (document.hidden) return;
-      const shownSince = loadedAt;
-      load().catch(error => {
-        // A load that finished in the meantime already replaced the data this
-        // refresh was for, so its failure no longer describes the board.
-        if (loadedAt === shownSince) showRefreshFailure(error);
+      const refresh = load();
+      // load() numbers itself before its first await.
+      const id = loadsStarted;
+      refresh.catch(error => {
+        // Data from a load that started later is already on the board, so
+        // this failure no longer describes it. An older load that succeeded
+        // in the meantime does not make the board live.
+        if (shownLoad < id) showRefreshFailure(error);
       });
     }, 15000);
 
