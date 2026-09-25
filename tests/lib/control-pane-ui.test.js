@@ -41,7 +41,9 @@ class PageDate extends Date {
 // elements looked up by selector, fetch, a fixed clock, and a setInterval
 // whose callback the test fires itself. While `hold` is set, a fetch waits in
 // `pending` until the test settles it, with the page's snapshot or another one.
-function openPage(snapshot) {
+// With `hold`, the first load is held too. Listeners are kept per element, so a
+// test can press a button.
+function openPage(snapshot, { hold = false } = {}) {
   const elements = new Map();
   const element = selector => {
     if (!elements.has(selector)) {
@@ -51,12 +53,15 @@ function openPage(snapshot) {
         innerHTML: '',
         value: '',
         dataset: {},
-        addEventListener() {}
+        listeners: {},
+        addEventListener(type, listener) {
+          this.listeners[type] = listener;
+        }
       });
     }
     return elements.get(selector);
   };
-  const page = { online: true, hold: false, pending: [], refresh: null, element };
+  const page = { online: true, hold, pending: [], refresh: null, element };
   vm.runInNewContext(inlineScript(renderControlPaneHtml()), {
     document: { hidden: false, querySelector: element, querySelectorAll: () => [] },
     window: { location: { href: 'http://127.0.0.1:8765/' } },
@@ -214,6 +219,63 @@ async function runTests() {
       page.pending[0].succeed(answer('older'));
       await settle();
       assert.strictEqual(page.element('#query').value, 'newer');
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    await test('the first snapshot still shows when a live refresh fails before it arrives', async () => {
+      const page = openPage(snapshot, { hold: true });
+      const answer = query => ({ ...snapshot, knowledge: { ...snapshot.knowledge, query } });
+
+      page.refresh();
+      page.pending[1].fail();
+      await settle();
+      page.pending[0].succeed(answer('first'));
+      await settle();
+      assert.strictEqual(page.element('#query').value, 'first', 'the pane is not left empty');
+      const box = page.element('#app');
+      assert.strictEqual(box.hidden, false, 'the newer failure stays up');
+      assert.match(box.textContent, /Live refresh failed\. The data below is from /);
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    await test('a manual refresh that fails after a newer load succeeded is not shown', async () => {
+      const page = openPage(snapshot);
+      await settle();
+
+      page.hold = true;
+      page.element('#refresh').listeners.click();
+      page.refresh();
+      page.pending[1].succeed();
+      await settle();
+      page.pending[0].fail();
+      await settle();
+      assert.strictEqual(page.element('#app').hidden, true, 'the newer success decides the board');
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    await test('an older load that succeeds after a newer manual refresh failed leaves the failure up', async () => {
+      const page = openPage(snapshot);
+      await settle();
+
+      page.hold = true;
+      page.refresh();
+      page.element('#refresh').listeners.click();
+      page.pending[1].fail();
+      await settle();
+      page.pending[0].succeed();
+      await settle();
+      const box = page.element('#app');
+      assert.strictEqual(box.hidden, false, 'the newer failure decides the board');
+      assert.match(box.textContent, /Failed to fetch/);
     })
   )
     passed++;

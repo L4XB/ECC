@@ -439,16 +439,23 @@ function renderControlPaneHtml() {
     // The board keeps the last snapshot on screen, so a failed refresh has to
     // say that the data is no longer live, and since when.
     let loadedAt = null;
-    // Loads are numbered as they start. The board follows the newest load that
-    // has finished, with its data or with its failure, so a load that finishes
-    // after a newer one leaves the board alone.
+    // Loads are numbered as they start and finish in any order. The board shows
+    // the newest data any load brought, and the error box the outcome of the
+    // newest load that has finished, so a load that finishes late can neither
+    // replace newer data nor overrule a newer outcome.
     let loadsStarted = 0;
     let newestFinished = 0;
+    let shownLoad = 0;
+    let failure = null;
     function showRefreshFailure(error) {
       const since = loadedAt
         ? ' The data below is from ' + loadedAt.toLocaleString() + '.'
         : '';
       showError('#app', 'Live refresh failed.' + since + '\\n' + formatError(error));
+    }
+    function showFailure() {
+      if (failure.live) showRefreshFailure(failure.error);
+      else showError('#app', failure.error);
     }
 
     async function readJsonResponse(response) {
@@ -639,14 +646,37 @@ function renderControlPaneHtml() {
       }
     }
 
-    async function load() {
+    async function load(live = false) {
       const id = ++loadsStarted;
-      const url = new URL('/api/snapshot', window.location.href);
-      if (state.query) url.searchParams.set('query', state.query);
-      const response = await fetch(url);
-      const snapshot = await readJsonResponse(response);
-      if (id < newestFinished) return;
+      let snapshot;
+      try {
+        const url = new URL('/api/snapshot', window.location.href);
+        if (state.query) url.searchParams.set('query', state.query);
+        const response = await fetch(url);
+        snapshot = await readJsonResponse(response);
+      } catch (error) {
+        if (id < newestFinished) return;
+        newestFinished = id;
+        failure = { error, live };
+        showFailure();
+        return;
+      }
+      if (id > shownLoad) {
+        shownLoad = id;
+        render(snapshot);
+      }
+      if (id < newestFinished) {
+        // A newer load failed first. This data is still the newest on the
+        // board, so the failure stays, dated by it.
+        if (failure && id === shownLoad) showFailure();
+        return;
+      }
       newestFinished = id;
+      failure = null;
+      clearError('#app');
+    }
+
+    function render(snapshot) {
       $('#query').value = snapshot.knowledge.query || state.query;
       $('#db-path').textContent = snapshot.database.exists ? snapshot.dbPath : 'database missing';
       state.allowActions = Boolean(snapshot.execution.allowActions);
@@ -661,7 +691,6 @@ function renderControlPaneHtml() {
         executable: snapshot.execution.allowActions && action.executable
       })));
       loadedAt = new Date();
-      clearError('#app');
     }
 
     $('#query-form').addEventListener('submit', event => {
@@ -701,14 +730,7 @@ function renderControlPaneHtml() {
     // Live board: refresh on a gentle interval; pause while a prompt/tab is hidden.
     setInterval(() => {
       if (document.hidden) return;
-      const refresh = load();
-      // load() numbers itself before its first await.
-      const id = loadsStarted;
-      refresh.catch(error => {
-        if (id < newestFinished) return;
-        newestFinished = id;
-        showRefreshFailure(error);
-      });
+      load(true).catch(error => showError('#app', error));
     }, 15000);
 
     load().catch(error => showError('#app', error));
