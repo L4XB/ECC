@@ -15,7 +15,13 @@
 
 'use strict';
 
-const { quotedRegions, quotedRegionAt, SHELL_RESERVED_WORDS, ASSIGNMENT_WORD } = require('../lib/shell-quotes');
+const {
+  quotedRegions,
+  quotedRegionAt,
+  commandStatements,
+  SHELL_RESERVED_WORDS,
+  ASSIGNMENT_WORD,
+} = require('../lib/shell-quotes');
 
 const MAX_STDIN = 1024 * 1024;
 let raw = '';
@@ -465,14 +471,87 @@ function startsAtSubstitution(input, argv0Start) {
 const SED_PROGRAMS = new Set(['sed', 'gsed']);
 
 /**
- * Where a sed command letter can stand: the start of the script, or after a
- * separator, a block brace, a negation or an address.
+ * The arguments sed receives in a statement, or null when the statement does
+ * not run sed: `sed ARGS`, or sed behind a wrapper (`sudo sed ARGS`).
  */
-const SED_COMMAND_START = /[\s;{}!$0-9/]/;
+function sedArguments(words) {
+  const base = commandBasename(words[0]);
+  if (SED_PROGRAMS.has(base)) return words.slice(1);
+  if (!COMMAND_WRAPPERS.has(base)) return null;
+  const at = words.findIndex((word) => SED_PROGRAMS.has(commandBasename(word)));
+  return at === -1 ? null : words.slice(at + 1);
+}
 
 /**
- * One part of a sed `s` command, from `start` up to the next unescaped
- * `delimiter`. An escaped delimiter stands for itself.
+ * The scripts in sed's arguments, read as GNU sed's option parser reads them:
+ * each `-e`/`--expression` value, or else the first operand. The other
+ * operands are input files, and a script named with `-f` is not on the line.
+ * When the shell may still change the words (`$OPTS`, a substitution), every
+ * operand may be the script.
+ */
+function sedScripts(args, everyOperand = false) {
+  const scripts = [];
+  const operands = [];
+  let scriptOption = false;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '--') {
+      operands.push(...args.slice(i + 1));
+      break;
+    }
+    if (arg.startsWith('--')) {
+      // A long option may be shortened to any prefix that names only it.
+      const [name, value] = arg.slice(2).split(/=(.*)/s);
+      if ('expression'.startsWith(name)) {
+        scripts.push(value ?? args[++i] ?? '');
+        scriptOption = true;
+      } else if (name.length >= 2 && 'file'.startsWith(name)) {
+        scriptOption = true;
+        if (value === undefined) i++;
+      } else if ('line-length'.startsWith(name) && value === undefined) {
+        i++;
+      }
+      continue;
+    }
+    if (arg.startsWith('-') && arg !== '-') {
+      for (let j = 1; j < arg.length; j++) {
+        const option = arg[j];
+        // -i takes the rest of the word as its backup suffix: `-ie` is -i with suffix e.
+        if (option === 'i') break;
+        if (option !== 'e' && option !== 'f' && option !== 'l') continue;
+        const value = j + 1 < arg.length ? arg.slice(j + 1) : args[++i];
+        if (option === 'e') scripts.push(value ?? '');
+        if (option !== 'l') scriptOption = true;
+        break;
+      }
+      continue;
+    }
+    operands.push(arg);
+  }
+  if (everyOperand) return [...scripts, ...operands];
+  if (!scriptOption && operands.length > 0) scripts.push(operands[0]);
+  return scripts;
+}
+
+/**
+ * The texts to read as sed scripts, each on its own. sed joins its scripts
+ * with newlines into one; when the shell may still change the words, every
+ * operand is read as a script of its own.
+ */
+function sedScriptTexts(args, opaque) {
+  return opaque ? sedScripts(args, true) : [sedScripts(args).join('\n')];
+}
+
+/** Past the spaces and tabs at `i`. */
+function skipBlanks(script, i) {
+  while (script[i] === ' ' || script[i] === '\t') i++;
+  return i;
+}
+
+/**
+ * One part of a sed `s` or `y` command or of a regex address, from `start` up
+ * to the next unescaped `delimiter`. An escaped delimiter stands for itself.
+ * sed rejects a part that an unescaped newline cuts short.
  */
 function sedPart(script, start, delimiter) {
   let text = '';
@@ -484,56 +563,185 @@ function sedPart(script, start, delimiter) {
       continue;
     }
     if (char === delimiter) return { text, end: i };
+    if (char === '\n') return null;
     text += char;
   }
   return null;
 }
 
 /**
- * What a sed script runs through a shell, as far as its text shows it (GNU
- * sed). An `s` command with the `e` flag runs the pattern space once the
- * replacement is made, and an `e` command runs its argument, or the pattern
- * space when it has none. `commands` holds the command text the script itself
- * supplies; `runsInput` says the text sed reads is run too.
+ * Past the sed address at `i`, if there is one: a line number (`3`, `0~4`),
+ * `$`, a regex (`/re/I`, `\%re%`) or, as the second address, `+N` or `~N`.
+ */
+function sedAddressEnd(script, i, second) {
+  const char = script[i];
+  if (char === '/' || char === '\\') {
+    const delimiter = char === '\\' ? script[i + 1] : char;
+    const regex = sedPart(script, char === '\\' ? i + 2 : i + 1, delimiter);
+    if (regex === null) return script.length;
+    i = skipBlanks(script, regex.end + 1);
+    while (script[i] === 'I' || script[i] === 'M') i = skipBlanks(script, i + 1);
+    return i;
+  }
+  if (char === '$') return i + 1;
+  if (!/[0-9]/.test(char || '') && !(second && (char === '+' || char === '~'))) return i;
+  if (!/[0-9]/.test(char)) i = skipBlanks(script, i + 1);
+  while (/[0-9]/.test(script[i] || '')) i++;
+  const step = skipBlanks(script, i);
+  if (second || script[step] !== '~') return i;
+  i = skipBlanks(script, step + 1);
+  while (/[0-9]/.test(script[i] || '')) i++;
+  return i;
+}
+
+/**
+ * The end of the text of an `a`, `i`, `c` or `e` command: the first newline
+ * that no backslash escapes. A backslash before a newline carries the text on.
+ */
+function sedTextEnd(script, i) {
+  for (; i < script.length; i++) {
+    if (script[i] === '\\') i++;
+    else if (script[i] === '\n') return i;
+  }
+  return script.length;
+}
+
+/**
+ * sed's text as the shell running it reads it: escaped characters stand for
+ * themselves, and a backslash before a newline joins the two lines.
+ */
+function sedUnescape(text) {
+  return text.replace(/\\\n/g, '').replace(/\\([\s\S])/g, (match, char) => (char === 'n' ? '\n' : char));
+}
+
+// Commands whose argument runs to the end of the line: a comment and a file name.
+const SED_LINE_COMMANDS = new Set(['#', 'r', 'R', 'w', 'W']);
+// Commands that take text, which the next newline without a backslash ends.
+const SED_TEXT_COMMANDS = new Set(['a', 'i', 'c', 'e']);
+// Commands that take a label or a version, which a blank or `;` ends.
+const SED_LABEL_COMMANDS = new Set([':', 'b', 't', 'T', 'v']);
+
+/**
+ * What a sed script runs through a shell (GNU sed). An `s` command with the
+ * `e` flag runs the pattern space once the replacement is made, and an `e`
+ * command runs its text, or the pattern space when it has none. The script is
+ * read command by command, as sed reads it, so the text `a`, `i` and `c` add,
+ * a comment, a label or a file name is never taken for a command. `commands`
+ * holds the command text the script itself supplies; `runsInput` says the text
+ * sed reads is run too.
  */
 function sedExecution(script) {
   const commands = [];
   let runsInput = false;
-  for (let i = 0; i < script.length; i++) {
-    const letter = script[i];
-    if (letter !== 's' && letter !== 'e') continue;
-    if (i > 0 && !SED_COMMAND_START.test(script[i - 1])) continue;
-    if (letter === 'e') {
-      const command = /^e(?:[ \t]+([^\n]+)|[ \t]*(?=[\n;}]|$))/.exec(script.slice(i));
-      if (!command) continue;
-      if (command[1] === undefined) runsInput = true;
-      else commands.push(command[1]);
+  let i = 0;
+  while (i < script.length) {
+    if (/[\s;]/.test(script[i])) {
+      i++;
       continue;
     }
-    const delimiter = script[i + 1];
-    if (!delimiter || /[\w\s\\]/.test(delimiter)) continue;
-    const pattern = sedPart(script, i + 2, delimiter);
-    const replacement = pattern && sedPart(script, pattern.end + 1, delimiter);
-    if (!replacement) continue;
-    const flags = /^[gpiImMe0-9]*/.exec(script.slice(replacement.end + 1))[0];
-    if (flags.includes('e')) {
-      commands.push(replacement.text);
-      runsInput = true;
+    i = skipBlanks(script, sedAddressEnd(script, i, false));
+    if (script[i] === ',') i = skipBlanks(script, sedAddressEnd(script, skipBlanks(script, i + 1), true));
+    while (script[i] === '!') i = skipBlanks(script, i + 1);
+    const command = script[i];
+    i++;
+    if (SED_LINE_COMMANDS.has(command)) {
+      const end = script.indexOf('\n', i);
+      i = end === -1 ? script.length : end;
+    } else if (SED_TEXT_COMMANDS.has(command)) {
+      i = skipBlanks(script, i);
+      const opensText = script[i] === '\\';
+      if (opensText) i += script[i + 1] === '\n' ? 2 : 1;
+      const end = sedTextEnd(script, i);
+      if (command === 'e') {
+        const text = sedUnescape(script.slice(i, end)).trim();
+        if (text === '') runsInput = true;
+        else commands.push(text);
+      }
+      i = end;
+    } else if (SED_LABEL_COMMANDS.has(command)) {
+      i = skipBlanks(script, i);
+      while (i < script.length && !/[\s;]/.test(script[i])) i++;
+    } else if (command === 's' || command === 'y') {
+      const delimiter = script[i];
+      const pattern = delimiter === undefined ? null : sedPart(script, i + 1, delimiter);
+      const replacement = pattern && sedPart(script, pattern.end + 1, delimiter);
+      // sed rejects a script with an unfinished command and runs none of it.
+      if (!replacement) break;
+      i = replacement.end + 1;
+      if (command === 'y') continue;
+      const flags = /^[gpiImMe0-9]*/.exec(script.slice(i))[0];
+      i += flags.length;
+      if (script[i] === 'w') {
+        const end = script.indexOf('\n', i);
+        i = end === -1 ? script.length : end;
+      }
+      if (flags.includes('e')) {
+        commands.push(sedUnescape(replacement.text));
+        runsInput = true;
+      }
     }
-    i = replacement.end + flags.length;
   }
   return { commands, runsInput };
 }
 
 /**
- * The commands the sed scripts in `input` run, taken from each quoted script
- * whose statement is sed. A script that only mentions a bypass flag, in a
- * pattern or a replacement it does not run, adds nothing.
+ * Where the statement that starts at `start` ends: at an unquoted `;`, `|`,
+ * `&` or newline, or at a `)` that closes the substitution or subshell around
+ * it. A substitution inside the statement is part of it. `opaque` says the
+ * shell may still change the statement's words: a parameter expansion or a
+ * substitution in them.
+ */
+function statementBounds(input, start) {
+  let quote = null;
+  let opaque = false;
+  let depth = 0;
+  let backtick = false;
+  for (let i = start; i < input.length; i++) {
+    const char = input.charAt(i);
+    if (quote === "'") {
+      if (char === "'") quote = null;
+      continue;
+    }
+    if (char === '\\') {
+      i++;
+      continue;
+    }
+    if (char === '$' && /[\w{(@*#?$!-]/.test(input.charAt(i + 1))) opaque = true;
+    if (char === '`') {
+      // A backtick that closes a substitution around the statement reads as
+      // opening one, so the rest of the line counts: more operands, not fewer.
+      opaque = true;
+      backtick = !backtick;
+    } else if (quote === '"') {
+      if (char === '"') quote = null;
+    } else if (char === "'" || char === '"') {
+      quote = char;
+    } else if (char === '(') {
+      opaque = true;
+      depth++;
+    } else if (char === ')') {
+      if (depth === 0) return { end: i, opaque };
+      depth--;
+    } else if (depth === 0 && !backtick && /[;|&\n]/.test(char)) {
+      return { end: i, opaque };
+    }
+  }
+  return { end: input.length, opaque };
+}
+
+/**
+ * The commands the sed scripts in `input` run, from every statement that runs
+ * sed. A script that only mentions a bypass flag, in a pattern or a text it
+ * does not run, adds nothing, and neither does an input file name.
  */
 function sedExecutedCommands(input) {
-  return quotedRegions(input)
-    .filter((region) => SED_PROGRAMS.has(commandBasename(region.argv0)))
-    .flatMap((region) => sedExecution(input.slice(region.start + 1, region.end)).commands);
+  return commandStatements(input).flatMap(({ argv0Start }) => {
+    const { end, opaque } = statementBounds(input, argv0Start);
+    const words = tokenizeShellWords(input, argv0Start, end).map((token) => token.value);
+    const args = sedArguments(words);
+    if (args === null) return [];
+    return sedScriptTexts(args, opaque).flatMap((script) => sedExecution(script).commands);
+  });
 }
 
 /**
@@ -546,7 +754,10 @@ function readsCodeFromStdin(words) {
   if (/[$`]/.test(words[0])) return true;
   const base = commandBasename(words[0]);
   if (COMMAND_WRAPPERS.has(base)) return true;
-  if (SED_PROGRAMS.has(base)) return words.slice(1).some((word) => sedExecution(word).runsInput);
+  if (SED_PROGRAMS.has(base)) {
+    const opaque = words.some((word) => /[$`]/.test(word));
+    return sedScriptTexts(words.slice(1), opaque).some((script) => sedExecution(script).runsInput);
+  }
   if (CODE_EVALUATORS.has(base)) return words.slice(1).every((word) => word.startsWith('-'));
   return false;
 }

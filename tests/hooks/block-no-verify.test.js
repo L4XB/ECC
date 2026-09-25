@@ -464,9 +464,55 @@ if (test('blocks a git bypass that a sed script runs', () => {
     "printf x | sed 'e git commit --no-verify'",
     "echo 'git push --no-verify' | sed e",
     "echo 'git push --no-verify' | sed 's/^//e'",
+    // Any character but a backslash or a newline can delimit an `s` command.
+    "printf foo | sed 'sxfooxgit push --no-verifyxe'",
+    // sed reads an escaped character in a replacement as that character.
+    "printf x | sed 's/x/git\\ push\\ --no-verify/e'",
+    // The script is read wherever sed takes it from.
+    'printf x | sed s/x/git\\ push\\ --no-verify/e',
+    'printf x | sed -es/x/git\\ push\\ --no-verify/e',
+    "printf x | sed --expr='s/x/git push --no-verify/e'",
+    "sed -n -- 'e git push --no-verify' notes.md",
+    "sed notes.md -e 'e git push --no-verify'",
+    "sed -l 80 'e git push --no-verify' notes.md",
+    // -ie is -i with the backup suffix e, so the operand is the script.
+    "sed -ie -n 'e git push --no-verify' notes.md",
+    "printf x | sudo sed 's/x/git push --no-verify/e'",
+    "printf x | sed -n '/x/!d; e git push --no-verify'",
+    // $EXPR may be an option such as -n, and then the quoted operand is the script.
+    "sed \"$EXPR\" 'e git push --no-verify' notes.md",
+    // So may the output of a substitution.
+    "printf x | sed `printf %s -n` 's/x/git push --no-verify/e'",
+    "printf x | sed $(printf %s -n) 's/x/git push --no-verify/e'",
   ]) {
     const r = runHook({ tool_input: { command } });
     assert.strictEqual(r.code, 2, `expected exit 2 for ${command}, got ${r.code}`);
+  }
+})) passed++; else failed++;
+
+// sed reads its script command by command: the text `a`, `i` and `c` add, a
+// comment, a label or a file name is never a command, and an operand after
+// the script, or after an -e or -f option, is an input file.
+if (test('allows sed input files, added text and comments that mention a bypass', () => {
+  for (const command of [
+    "sed 's/x/y/' 'e git commit --no-verify'",
+    "sed -e 's/x/y/' 'e git commit --no-verify'",
+    "sed --expression='s/x/y/' 'e git push --no-verify'",
+    "sed -f fix.sed 'e git push --no-verify'",
+    "sed --file=fix.sed 'e git push --no-verify'",
+    "sed -i '1i e git push --no-verify is unsafe' README.md",
+    "sed -i '$a e git push --no-verify is unsafe' README.md",
+    "sed -i '/hooks/c e git push --no-verify is unsafe' README.md",
+    "sed -n '# e git push --no-verify' README.md",
+    // Addresses that match the text of a sed command that runs git.
+    "sed -n '/s|x|git push --no-verify|e/p' notes.md",
+    "sed -n '\\%s/x/git push --no-verify/e%p' notes.md",
+    "sed -n 'w e git push --no-verify' notes.md",
+    // Labels named e, which the t command branches to.
+    "echo 'git push --no-verify' | sed -e :e -e '$!N;s/\\n/ /;te'",
+  ]) {
+    const r = runHook({ tool_input: { command } });
+    assert.strictEqual(r.code, 0, `expected exit 0 for ${command}, got ${r.code}: ${r.stderr}`);
   }
 })) passed++; else failed++;
 
