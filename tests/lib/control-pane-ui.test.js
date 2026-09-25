@@ -142,6 +142,25 @@ async function runTests() {
   else failed++;
 
   if (
+    await test('a failed refresh stays off the board while newer data is shown and another refresh runs', async () => {
+      const page = openPage(snapshot);
+      await settle();
+
+      page.hold = true;
+      page.refresh();
+      page.refresh();
+      page.refresh();
+      page.pending[1].succeed();
+      await settle();
+      page.pending[0].fail();
+      await settle();
+      assert.strictEqual(page.element('#app').hidden, true, 'the board shows data from a load that started after the failed one');
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
     await test('a refresh that fails after an older one succeeded is reported', async () => {
       const page = openPage(snapshot);
       await settle();
