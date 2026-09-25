@@ -12,7 +12,8 @@
  * (its own statements and quotes) until the matching `)` / backtick, after
  * which the string resumes as a new region. Both halves are flagged
  * `substitution`. Regions are appended only once complete, in order, so they
- * are disjoint and sorted. The result is cached per input, so a command line
+ * are disjoint and sorted. The same pass records where each statement's argv0
+ * starts, quoted or not. The result is cached per input, so a command line
  * holding thousands of quoted tokens is scanned once.
  */
 
@@ -28,11 +29,12 @@ const ASSIGNMENT_WORD = /^[A-Za-z_][A-Za-z0-9_]*=/;
 // Unquoted characters that start a new statement (or a nested command).
 const STATEMENT_SEPARATORS = new Set([';', '|', '&', '\n', '(', ')', '`']);
 
-let cache = { input: null, regions: [] };
+let cache = { input: null, regions: [], statements: [] };
 
 function createState() {
   return {
     regions: [],
+    statements: [],
     suspended: [],
     quote: null,
     escaped: false,
@@ -60,6 +62,7 @@ function endWord(state) {
   ) {
     state.argv0 = state.word;
     state.argv0Start = state.wordStart;
+    state.statements.push({ argv0: state.argv0, argv0Start: state.argv0Start });
   }
   state.word = '';
   state.inWord = false;
@@ -168,14 +171,8 @@ function scanBareChar(state, index, char) {
   return 1;
 }
 
-/**
- * Every quoted region of `input`, sorted by start and disjoint.
- *
- * @param {string} input
- * @returns {Array<{start: number, end: number, quote: string, argv0: string, argv0Start: number, substitution: boolean}>}
- */
-function quotedRegions(input) {
-  if (cache.input === input) return cache.regions;
+function scan(input) {
+  if (cache.input === input) return cache;
   const state = createState();
   for (let i = 0; i < input.length; ) {
     const char = input.charAt(i);
@@ -189,8 +186,30 @@ function quotedRegions(input) {
     i += state.quote ? scanQuotedChar(state, input, i) : scanBareChar(state, i, char);
   }
   if (state.open !== null) state.regions.push({ ...state.open, end: input.length });
-  cache = { input, regions: state.regions };
-  return state.regions;
+  cache = { input, regions: state.regions, statements: state.statements };
+  return cache;
+}
+
+/**
+ * Every quoted region of `input`, sorted by start and disjoint.
+ *
+ * @param {string} input
+ * @returns {Array<{start: number, end: number, quote: string, argv0: string, argv0Start: number, substitution: boolean}>}
+ */
+function quotedRegions(input) {
+  return scan(input).regions;
+}
+
+/**
+ * Every statement of `input` whose argv0 ends before the input does, with
+ * the offset where that argv0 starts: top-level statements and those inside a
+ * substitution alike.
+ *
+ * @param {string} input
+ * @returns {Array<{argv0: string, argv0Start: number}>}
+ */
+function commandStatements(input) {
+  return scan(input).statements;
 }
 
 /**
@@ -218,4 +237,4 @@ function quotedRegionAt(input, idx) {
   return null;
 }
 
-module.exports = { quotedRegions, quotedRegionAt, SHELL_RESERVED_WORDS, ASSIGNMENT_WORD };
+module.exports = { quotedRegions, quotedRegionAt, commandStatements, SHELL_RESERVED_WORDS, ASSIGNMENT_WORD };
