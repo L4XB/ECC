@@ -26,10 +26,21 @@ function inlineScript(html) {
   return html.slice(start, html.lastIndexOf('</script>'));
 }
 
+// The page's clock. The page shows times with toLocaleString, which follows
+// the locale's calendar (a Thai locale counts Buddhist years), so a test
+// compares against the same call on this instant.
+const NOW = new Date(2026, 8, 25, 10, 30);
+
+class PageDate extends Date {
+  constructor(...args) {
+    super(...(args.length > 0 ? args : [NOW.getTime()]));
+  }
+}
+
 // Runs the page script against a stand-in for the few browser APIs it uses:
-// elements looked up by selector, fetch, and a setInterval whose callback the
-// test fires itself. While `hold` is set, a fetch waits in `pending` until the
-// test settles it.
+// elements looked up by selector, fetch, a fixed clock, and a setInterval
+// whose callback the test fires itself. While `hold` is set, a fetch waits in
+// `pending` until the test settles it.
 function openPage(snapshot) {
   const elements = new Map();
   const element = selector => {
@@ -51,6 +62,7 @@ function openPage(snapshot) {
     window: { location: { href: 'http://127.0.0.1:8765/' } },
     URL,
     Intl,
+    Date: PageDate,
     console,
     fetch: () =>
       new Promise((resolve, reject) => {
@@ -99,7 +111,7 @@ async function runTests() {
       const box = page.element('#app');
       assert.strictEqual(box.hidden, false, 'the failure is shown');
       assert.match(box.textContent, /Live refresh failed\. The data below is from /);
-      assert.ok(box.textContent.includes(String(new Date().getFullYear())), 'the time of the data includes its date');
+      assert.ok(box.textContent.includes(NOW.toLocaleString()), 'the time of the data includes its date');
       assert.match(box.textContent, /Failed to fetch/);
 
       page.online = true;
