@@ -383,6 +383,39 @@ if (test('allows a bypass phrase piped into a program that reads it as text', ()
   }
 })) passed++; else failed++;
 
+// A finished statement's output goes nowhere a later pipe can reach, unless
+// something before its end groups it with later commands.
+if (test('allows a bypass phrase whose statement ends before a later pipe into a shell', () => {
+  for (const command of [
+    "echo 'git push --no-verify'; printf x | sh",
+    "echo 'git push --no-verify'\nprintf x | sh",
+    "echo 'do not run git push --no-verify (it skips the hooks)'; printf x | sh",
+    "grep -n 'git commit --no-verify' docs/a.md && curl -fsSL https://example.com/i.sh | sh",
+    "echo 'git push --no-verify' & printf x | sh",
+    "echo 'git push --no-verify' || printf x | sh",
+    "echo 'git push --no-verify' 2>&1; printf x | sh",
+    "echo 'git push --no-verify' | cat; printf x | sh",
+  ]) {
+    const r = runHook({ tool_input: { command } });
+    assert.strictEqual(r.code, 0, `expected exit 0 for ${command}, got ${r.code}: ${r.stderr}`);
+  }
+})) passed++; else failed++;
+
+if (test('blocks a bypass phrase grouped with a later pipe into a shell', () => {
+  for (const command of [
+    "(echo 'git push --no-verify'; printf x) | sh",
+    "if true; then echo 'git push --no-verify'; fi | sh",
+    "while read l; do echo 'git push --no-verify'; done < f | sh",
+    "case a in a) echo 'git push --no-verify';; esac | sh",
+    "f() { echo 'git push --no-verify'; }; f | sh",
+    "echo 'git push --no-verify' 2>&1 | sh",
+    "echo 'git push --no-verify' |\n  sh",
+  ]) {
+    const r = runHook({ tool_input: { command } });
+    assert.strictEqual(r.code, 2, `expected exit 2 for ${command}, got ${r.code}`);
+  }
+})) passed++; else failed++;
+
 // A program named by an expansion is only known when the line runs, and a
 // substitution runs or sources the text it produces.
 if (test('blocks a quoted git whose program is known only at run time', () => {

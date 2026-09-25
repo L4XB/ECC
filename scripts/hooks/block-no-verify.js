@@ -15,7 +15,7 @@
 
 'use strict';
 
-const { quotedRegionAt, ASSIGNMENT_WORD } = require('../lib/shell-quotes');
+const { quotedRegions, quotedRegionAt, SHELL_RESERVED_WORDS, ASSIGNMENT_WORD } = require('../lib/shell-quotes');
 
 const MAX_STDIN = 1024 * 1024;
 let raw = '';
@@ -476,16 +476,57 @@ function readsCodeFromStdin(words) {
 }
 
 /**
+ * Whether the separator at `i` ends a statement instead of joining the next
+ * command to it: `;`, a newline, `&&`, `||` or a background `&`. A pipe (`|`,
+ * `|&`) joins, and so does the `&` of a redirection (`2>&1`, `>&2`, `&>`).
+ */
+function endsStatement(input, i) {
+  const char = input.charAt(i);
+  if (char === ';' || char === '\n') return true;
+  if (char === '|') return input.charAt(i + 1) === '|';
+  if (char !== '&') return false;
+  const before = input.charAt(i - 1);
+  return before !== '>' && before !== '<' && before !== '|' && input.charAt(i + 1) !== '>';
+}
+
+/**
+ * Whether the command line before `end` holds anything that can carry the
+ * output of a finished statement into a later pipe: a brace group or
+ * subshell (`{ echo '...'; } | sh`), a function body called later on, a
+ * compound command (`if ...; fi | sh`) or a substitution. Quoted text does
+ * not count.
+ */
+function mayGroupStatements(input, end) {
+  let bare = '';
+  let pos = 0;
+  for (const region of quotedRegions(input)) {
+    if (region.start >= end) break;
+    bare += `${input.slice(pos, region.start)} `;
+    pos = region.end + 1;
+  }
+  bare += input.slice(pos, end);
+  return /[{}()`]/.test(bare) || bare.split(/[\s;&|]+/).some((word) => SHELL_RESERVED_WORDS.has(word));
+}
+
+/**
  * Whether a later part of the command line pipes into a program that reads
  * what it receives as code (`echo '...' | sh`). Every later pipe counts, not
  * only the rest of this pipeline, so a group such as `{ echo '...'; } | sh`
- * is covered as well.
+ * is covered as well. When nothing before a statement's end can group it
+ * with later commands, its output stops there: in
+ * `echo '...'; printf x | sh` only `printf x` reaches `sh`.
  */
 function pipesIntoCodeReader(input, from) {
   let pos = from;
+  let grouped = false;
   while (pos < input.length) {
     const end = findCommandSegmentEnd(input, pos);
     if (end >= input.length) return false;
+    // The prefix only grows, so once it can group statements it always can.
+    if (!grouped && endsStatement(input, end)) {
+      if (!mayGroupStatements(input, end)) return false;
+      grouped = true;
+    }
     pos = end + 1;
     if (input.charAt(end) !== '|') continue;
     if (input.charAt(pos) === '|') {
@@ -493,6 +534,8 @@ function pipesIntoCodeReader(input, from) {
       continue;
     }
     if (input.charAt(pos) === '&') pos += 1;
+    // A newline right after a pipe continues the pipeline.
+    while (/\s/.test(input.charAt(pos))) pos += 1;
     const words = tokenizeShellWords(input, pos, findCommandSegmentEnd(input, pos))
       .map((token) => token.value)
       .filter((word) => !ASSIGNMENT_WORD.test(word));
