@@ -40,7 +40,7 @@ class PageDate extends Date {
 // Runs the page script against a stand-in for the few browser APIs it uses:
 // elements looked up by selector, fetch, a fixed clock, and a setInterval
 // whose callback the test fires itself. While `hold` is set, a fetch waits in
-// `pending` until the test settles it.
+// `pending` until the test settles it, with the page's snapshot or another one.
 function openPage(snapshot) {
   const elements = new Map();
   const element = selector => {
@@ -67,7 +67,7 @@ function openPage(snapshot) {
     fetch: () =>
       new Promise((resolve, reject) => {
         const reply = {
-          succeed: () => resolve({ ok: true, status: 200, statusText: 'OK', json: async () => snapshot }),
+          succeed: (data = snapshot) => resolve({ ok: true, status: 200, statusText: 'OK', json: async () => data }),
           fail: () => reject(new TypeError('Failed to fetch'))
         };
         if (page.hold) page.pending.push(reply);
@@ -195,6 +195,25 @@ async function runTests() {
       const box = page.element('#app');
       assert.strictEqual(box.hidden, false, 'no load that started after the failed one has succeeded');
       assert.match(box.textContent, /Live refresh failed\. The data below is from /);
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    await test('an older response that arrives after a newer one does not replace its data', async () => {
+      const page = openPage(snapshot);
+      await settle();
+      const answer = query => ({ ...snapshot, knowledge: { ...snapshot.knowledge, query } });
+
+      page.hold = true;
+      page.refresh();
+      page.refresh();
+      page.pending[1].succeed(answer('newer'));
+      await settle();
+      page.pending[0].succeed(answer('older'));
+      await settle();
+      assert.strictEqual(page.element('#query').value, 'newer');
     })
   )
     passed++;
