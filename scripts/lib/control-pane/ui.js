@@ -410,7 +410,7 @@ function renderControlPaneHtml() {
   </div>
   <div id="app" hidden></div>
   <script>
-    const state = { query: '' };
+    const state = { query: '', shownQuery: '' };
     const $ = selector => document.querySelector(selector);
     const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({
       '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -633,10 +633,12 @@ function renderControlPaneHtml() {
       output.textContent = 'Running ' + actionId + '...';
 
       try {
+        // An action runs for the query its card on the board was built for.
+        // After a failed load that is not always the query typed last.
         const response = await fetch('/api/actions/' + encodeURIComponent(actionId), {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ query: state.query })
+          body: JSON.stringify({ query: state.shownQuery })
         });
         const payload = await readJsonResponse(response);
         output.textContent = JSON.stringify(payload, null, 2);
@@ -648,22 +650,24 @@ function renderControlPaneHtml() {
 
     async function load(live = false) {
       const id = ++loadsStarted;
-      let snapshot;
+      const query = state.query;
       try {
         const url = new URL('/api/snapshot', window.location.href);
-        if (state.query) url.searchParams.set('query', state.query);
+        if (query) url.searchParams.set('query', query);
         const response = await fetch(url);
-        snapshot = await readJsonResponse(response);
+        const snapshot = await readJsonResponse(response);
+        // A snapshot that cannot be shown fails its load like one that could
+        // not be fetched, and older data may still take the board.
+        if (id > shownLoad) {
+          render(snapshot, query);
+          shownLoad = id;
+        }
       } catch (error) {
         if (id < newestFinished) return;
         newestFinished = id;
         failure = { error, live };
         showFailure();
         return;
-      }
-      if (id > shownLoad) {
-        shownLoad = id;
-        render(snapshot);
       }
       if (id < newestFinished) {
         // A newer load failed first. This data is still the newest on the
@@ -676,7 +680,7 @@ function renderControlPaneHtml() {
       clearError('#app');
     }
 
-    function render(snapshot) {
+    function render(snapshot, query) {
       $('#query').value = snapshot.knowledge.query || state.query;
       $('#db-path').textContent = snapshot.database.exists ? snapshot.dbPath : 'database missing';
       state.allowActions = Boolean(snapshot.execution.allowActions);
@@ -690,6 +694,7 @@ function renderControlPaneHtml() {
         ...action,
         executable: snapshot.execution.allowActions && action.executable
       })));
+      state.shownQuery = query;
       loadedAt = new Date();
     }
 

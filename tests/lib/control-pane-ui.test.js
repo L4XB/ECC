@@ -42,7 +42,8 @@ class PageDate extends Date {
 // whose callback the test fires itself. While `hold` is set, a fetch waits in
 // `pending` until the test settles it, with the page's snapshot or another one.
 // With `hold`, the first load is held too. Listeners are kept per element, so a
-// test can press a button.
+// test can press a button. Every request is recorded, and `page.script` holds
+// the page's own functions, such as the runAction a Run button calls.
 function openPage(snapshot, { hold = false } = {}) {
   const elements = new Map();
   const element = selector => {
@@ -61,28 +62,30 @@ function openPage(snapshot, { hold = false } = {}) {
     }
     return elements.get(selector);
   };
-  const page = { online: true, hold, pending: [], refresh: null, element };
-  vm.runInNewContext(inlineScript(renderControlPaneHtml()), {
+  const page = { online: true, hold, pending: [], requests: [], refresh: null, element };
+  page.script = {
     document: { hidden: false, querySelector: element, querySelectorAll: () => [] },
     window: { location: { href: 'http://127.0.0.1:8765/' } },
     URL,
     Intl,
     Date: PageDate,
     console,
-    fetch: () =>
+    fetch: (url, options = {}) =>
       new Promise((resolve, reject) => {
+        page.requests = [...page.requests, { url: String(url), options }];
         const reply = {
           succeed: (data = snapshot) => resolve({ ok: true, status: 200, statusText: 'OK', json: async () => data }),
           fail: () => reject(new TypeError('Failed to fetch'))
         };
-        if (page.hold) page.pending.push(reply);
+        if (page.hold) page.pending = [...page.pending, reply];
         else if (page.online) reply.succeed();
         else reply.fail();
       }),
     setInterval: callback => {
       page.refresh = callback;
     }
-  });
+  };
+  vm.runInNewContext(inlineScript(renderControlPaneHtml()), page.script);
   return page;
 }
 
@@ -276,6 +279,61 @@ async function runTests() {
       const box = page.element('#app');
       assert.strictEqual(box.hidden, false, 'the newer failure decides the board');
       assert.match(box.textContent, /Failed to fetch/);
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    await test('a snapshot that cannot be shown fails its load, and older data can still take the board', async () => {
+      const page = openPage(snapshot);
+      await settle();
+      const answer = query => ({ ...snapshot, knowledge: { ...snapshot.knowledge, query } });
+      // The session table cannot list harnesses stored as an object.
+      const unshowable = {
+        ...answer('newer'),
+        sessions: [{ id: 'session-1', state: 'running', detectedHarnesses: { claude: true } }]
+      };
+
+      page.hold = true;
+      page.refresh();
+      page.refresh();
+      page.pending[1].succeed(unshowable);
+      await settle();
+      const box = page.element('#app');
+      assert.strictEqual(box.hidden, false, 'the newer load failed');
+      assert.match(box.textContent, /Live refresh failed\. The data below is from /);
+      page.pending[0].succeed(answer('older'));
+      await settle();
+      assert.strictEqual(page.element('#query').value, 'older', 'the older snapshot is shown');
+      assert.strictEqual(box.hidden, false, 'the newer failure stays up');
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    await test('Run acts on the query whose results are on the board', async () => {
+      const page = openPage(snapshot);
+      await settle();
+      const answer = query => ({ ...snapshot, knowledge: { ...snapshot.knowledge, query } });
+      const search = query => {
+        page.element('#query').value = query;
+        page.element('#query-form').listeners.submit({ preventDefault() {} });
+      };
+
+      page.hold = true;
+      search('older');
+      search('newer');
+      page.pending[1].fail();
+      await settle();
+      page.pending[0].succeed(answer('older'));
+      await settle();
+      page.hold = false;
+      await page.script.runAction('recall-knowledge');
+      const run = page.requests.find(request => request.options.method === 'POST');
+      assert.strictEqual(run.url, '/api/actions/recall-knowledge');
+      assert.deepStrictEqual(JSON.parse(run.options.body), { query: 'older' }, 'the recall shown on the board');
     })
   )
     passed++;
