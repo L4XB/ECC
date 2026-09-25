@@ -439,10 +439,11 @@ function renderControlPaneHtml() {
     // The board keeps the last snapshot on screen, so a failed refresh has to
     // say that the data is no longer live, and since when.
     let loadedAt = null;
-    // Loads are numbered as they start, so a failed refresh can tell whether
-    // the board already shows data from a load that started after it.
+    // Loads are numbered as they start. The board follows the newest load that
+    // has finished, with its data or with its failure, so a load that finishes
+    // after a newer one leaves the board alone.
     let loadsStarted = 0;
-    let shownLoad = 0;
+    let newestFinished = 0;
     function showRefreshFailure(error) {
       const since = loadedAt
         ? ' The data below is from ' + loadedAt.toLocaleString() + '.'
@@ -644,6 +645,8 @@ function renderControlPaneHtml() {
       if (state.query) url.searchParams.set('query', state.query);
       const response = await fetch(url);
       const snapshot = await readJsonResponse(response);
+      if (id < newestFinished) return;
+      newestFinished = id;
       $('#query').value = snapshot.knowledge.query || state.query;
       $('#db-path').textContent = snapshot.database.exists ? snapshot.dbPath : 'database missing';
       state.allowActions = Boolean(snapshot.execution.allowActions);
@@ -658,7 +661,6 @@ function renderControlPaneHtml() {
         executable: snapshot.execution.allowActions && action.executable
       })));
       loadedAt = new Date();
-      shownLoad = id;
       clearError('#app');
     }
 
@@ -703,10 +705,9 @@ function renderControlPaneHtml() {
       // load() numbers itself before its first await.
       const id = loadsStarted;
       refresh.catch(error => {
-        // Data from a load that started later is already on the board, so
-        // this failure no longer describes it. An older load that succeeded
-        // in the meantime does not make the board live.
-        if (shownLoad < id) showRefreshFailure(error);
+        if (id < newestFinished) return;
+        newestFinished = id;
+        showRefreshFailure(error);
       });
     }, 15000);
 
