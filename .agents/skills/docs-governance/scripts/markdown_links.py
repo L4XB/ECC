@@ -49,10 +49,36 @@ def without_fenced_code(text: str) -> str:
     return "".join(output)
 
 
-def without_inline_code(text: str) -> str:
+def _is_escaped(text: str, index: int) -> bool:
+    backslashes = 0
+    while index - backslashes > 0 and text[index - backslashes - 1] == "\\":
+        backslashes += 1
+    return backslashes % 2 == 1
+
+
+def without_inline_code_and_html_comments(text: str) -> str:
+    """Blank out inline code spans and HTML comments, whichever opens first.
+
+    A comment runs from `<!--` to the first `-->` after it (`<!-->` and `<!--->` included). It
+    becomes an opaque run of NUL characters, so a link or a reference definition cannot continue
+    through it, as none can through raw HTML. An escaped `\\<!--`, or an opener with no closer,
+    stays literal text, as in CommonMark.
+    """
     output: list[str] = []
     cursor = 0
+    comments_can_close = True
     while cursor < len(text):
+        if comments_can_close and text.startswith("<!--", cursor) and not _is_escaped(text, cursor):
+            closing = text.find("-->", cursor + 2)
+            if closing != -1:
+                output.extend(
+                    "\n" if character == "\n" else "\0"
+                    for character in text[cursor : closing + 3]
+                )
+                cursor = closing + 3
+                continue
+            # -- no closer here means none for any later opener either --
+            comments_can_close = False
         if text[cursor] != "`":
             output.append(text[cursor])
             cursor += 1
@@ -71,28 +97,6 @@ def without_inline_code(text: str) -> str:
             for character in text[cursor : closing + len(marker)]
         )
         cursor = closing + len(marker)
-    return "".join(output)
-
-
-def without_html_comments(text: str) -> str:
-    """Blank out HTML comments, where link-shaped text is not a link.
-
-    A comment runs from `<!--` to the first `-->` after it (`<!-->` and `<!--->` included). An
-    opener with no closer is left alone, as CommonMark leaves it literal text inline.
-    """
-    output: list[str] = []
-    cursor = 0
-    while True:
-        start = text.find("<!--", cursor)
-        if start == -1:
-            break
-        end = text.find("-->", start + 2)
-        if end == -1:
-            break
-        output.append(text[cursor:start])
-        output.append(re.sub(r"[^\n]", " ", text[start : end + 3]))
-        cursor = end + 3
-    output.append(text[cursor:])
     return "".join(output)
 
 
@@ -195,7 +199,7 @@ def reference_link_targets(text: str) -> list[str]:
 
 
 def markdown_link_targets(text: str) -> list[str]:
-    text = without_html_comments(without_inline_code(without_fenced_code(text)))
+    text = without_inline_code_and_html_comments(without_fenced_code(text))
     return inline_link_targets(text) + reference_link_targets(text)
 
 
