@@ -38,9 +38,12 @@ function redactSecrets(value) {
     .replace(/\bAKIA[A-Z0-9]{16}\b/g, '<REDACTED>')
     .replace(/\bASIA[A-Z0-9]{16}\b/g, '<REDACTED>')
     .replace(/password[= ][^ ]*/gi, 'password=<REDACTED>')
-    .replace(/\bghp_[A-Za-z0-9_]+\b/g, '<REDACTED>')
-    .replace(/\bgho_[A-Za-z0-9_]+\b/g, '<REDACTED>')
-    .replace(/\bghs_[A-Za-z0-9_]+\b/g, '<REDACTED>')
+    // The rest covers what governance-capture detects, since tool output such as
+    // `cat .env` lands in these summaries too.
+    .replace(/(api[_-]?key|secret|token)(["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s"',;]+)/gi, '$1$2<REDACTED>')
+    .replace(/\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, '<REDACTED>')
+    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----.*/g, '<REDACTED>')
+    .replace(/\bgh[pousr]_[A-Za-z0-9_]+\b/g, '<REDACTED>')
     .replace(/\bgithub_pat_[A-Za-z0-9_]+\b/g, '<REDACTED>');
 }
 
