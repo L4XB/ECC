@@ -266,6 +266,20 @@ def test_artifact_scope_ignores_links_inside_code_examples(project: Path) -> Non
     assert result.returncode == 0, result.stdout
 
 
+def test_artifact_scope_ignores_links_inside_html_comments(project: Path) -> None:
+    (project / "guide.md").write_text(
+        "Intro <!-- [old](missing-inline.md) --> text\n\n"
+        "<!--\nSee [draft](missing-draft.md).\n-->\n\n"
+        "<!-- --> [after](missing-after.md)\n",
+        encoding="utf-8",
+    )
+    result = run_audit(project, "artifacts")
+    assert result.returncode == 1
+    assert "missing-inline.md" not in result.stdout
+    assert "missing-draft.md" not in result.stdout
+    assert "Broken Markdown link: 'guide.md' -> 'missing-after.md'" in result.stdout
+
+
 def test_artifact_scope_ignores_title_with_escaped_quotes(project: Path) -> None:
     (project / "guide.md").write_text("# Guide\n", encoding="utf-8")
     (project / "index.md").write_text(

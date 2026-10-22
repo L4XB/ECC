@@ -74,6 +74,28 @@ def without_inline_code(text: str) -> str:
     return "".join(output)
 
 
+def without_html_comments(text: str) -> str:
+    """Blank out HTML comments, where link-shaped text is not a link.
+
+    A comment runs from `<!--` to the first `-->` after it (`<!-->` and `<!--->` included). An
+    opener with no closer is left alone, as CommonMark leaves it literal text inline.
+    """
+    output: list[str] = []
+    cursor = 0
+    while True:
+        start = text.find("<!--", cursor)
+        if start == -1:
+            break
+        end = text.find("-->", start + 2)
+        if end == -1:
+            break
+        output.append(text[cursor:start])
+        output.append(re.sub(r"[^\n]", " ", text[start : end + 3]))
+        cursor = end + 3
+    output.append(text[cursor:])
+    return "".join(output)
+
+
 def inline_link_targets(text: str) -> list[str]:
     targets: list[str] = []
     matches = list(INLINE_LINK_START_RE.finditer(text))
@@ -173,7 +195,7 @@ def reference_link_targets(text: str) -> list[str]:
 
 
 def markdown_link_targets(text: str) -> list[str]:
-    text = without_inline_code(without_fenced_code(text))
+    text = without_html_comments(without_inline_code(without_fenced_code(text)))
     return inline_link_targets(text) + reference_link_targets(text)
 
 
