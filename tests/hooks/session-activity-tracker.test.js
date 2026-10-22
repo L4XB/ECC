@@ -517,6 +517,7 @@ function runTests() {
     assert.strictEqual(summarizeOutput('OPENAI_API_KEY=sk-abc123def456\nDEBUG=1'), 'OPENAI_API_KEY=<REDACTED> DEBUG=1');
     assert.strictEqual(summarizeOutput('AWS_SECRET_ACCESS_KEY=example-secret-value'), 'AWS_SECRET_ACCESS_KEY=<REDACTED>');
     assert.strictEqual(summarizeOutput('DOCKER_AUTH_CONFIG={"auths":{"registry":{}}}'), 'DOCKER_AUTH_CONFIG=<REDACTED>');
+    assert.strictEqual(summarizeOutput('DOCKER_AUTH_CONFIG={"auths": {"registry": {"auth": "dXNlcjpwYXNz"}}}'), 'DOCKER_AUTH_CONFIG=<REDACTED>');
     assert.strictEqual(summarizeOutput('{"token": "abc.def", "user": "bob"}'), '{"token": <REDACTED>, "user": "bob"}');
     const jwt = ['eyJ' + 'a'.repeat(12), 'eyJ' + 'b'.repeat(12), 'c'.repeat(12)].join('.');
     assert.strictEqual(summarizeOutput(`Bearer ${jwt} done`), 'Bearer <REDACTED> done');
