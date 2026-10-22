@@ -518,6 +518,8 @@ function runTests() {
     assert.strictEqual(summarizeOutput('AWS_SECRET_ACCESS_KEY=example-secret-value'), 'AWS_SECRET_ACCESS_KEY=<REDACTED>');
     assert.strictEqual(summarizeOutput('DOCKER_AUTH_CONFIG={"auths":{"registry":{}}}'), 'DOCKER_AUTH_CONFIG=<REDACTED>');
     assert.strictEqual(summarizeOutput('DOCKER_AUTH_CONFIG={"auths": {"registry": {"auth": "dXNlcjpwYXNz"}}}'), 'DOCKER_AUTH_CONFIG=<REDACTED>');
+    assert.strictEqual(summarizeOutput('{"auths":{"registry":{"auth":"dXNlcjpwYXNz"}}}'), '{"auths":{"registry":{"auth":<REDACTED>}}}');
+    assert.strictEqual(summarizeOutput('auth_method=oidc author=Jane'), 'auth_method=oidc author=Jane');
     assert.strictEqual(summarizeOutput('{"token": "abc.def", "user": "bob"}'), '{"token": <REDACTED>, "user": "bob"}');
     const jwt = ['eyJ' + 'a'.repeat(12), 'eyJ' + 'b'.repeat(12), 'c'.repeat(12)].join('.');
     assert.strictEqual(summarizeOutput(`Bearer ${jwt} done`), 'Bearer <REDACTED> done');
