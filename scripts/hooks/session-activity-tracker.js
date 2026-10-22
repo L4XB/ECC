@@ -40,7 +40,9 @@ function redactSecrets(value) {
     .replace(/password[= ][^ ]*/gi, 'password=<REDACTED>')
     // The rest covers what governance-capture detects, since tool output such as
     // `cat .env` lands in these summaries too.
-    .replace(/(api[_-]?key|secret|token)(["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s"',;]+)/gi, '$1$2<REDACTED>')
+    // A name that carries a credential word anywhere (`AWS_SECRET_ACCESS_KEY`,
+    // `DOCKER_AUTH_CONFIG`), but not `max_tokens` or `tokenizer`.
+    .replace(/\b([\w.-]*(?:secret|token(?!s|iz)|passw(?:or)?d|api[_-]?key|access[_-]?key|private[_-]?key|credential|auth[_-]?config)[\w.-]*)(["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|\S+)/gi, '$1$2<REDACTED>')
     .replace(/\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, '<REDACTED>')
     .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----.*/g, '<REDACTED>')
     .replace(/\bgh[pousr]_[A-Za-z0-9_]+\b/g, '<REDACTED>')

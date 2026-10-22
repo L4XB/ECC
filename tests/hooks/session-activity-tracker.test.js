@@ -515,12 +515,14 @@ function runTests() {
     // detects are redacted as well.
     assert.strictEqual(summarizeOutput({ stdout: 'api_key = "example-secret-value"\n', stderr: '' }), 'api_key = <REDACTED>');
     assert.strictEqual(summarizeOutput('OPENAI_API_KEY=sk-abc123def456\nDEBUG=1'), 'OPENAI_API_KEY=<REDACTED> DEBUG=1');
+    assert.strictEqual(summarizeOutput('AWS_SECRET_ACCESS_KEY=example-secret-value'), 'AWS_SECRET_ACCESS_KEY=<REDACTED>');
+    assert.strictEqual(summarizeOutput('DOCKER_AUTH_CONFIG={"auths":{"registry":{}}}'), 'DOCKER_AUTH_CONFIG=<REDACTED>');
     assert.strictEqual(summarizeOutput('{"token": "abc.def", "user": "bob"}'), '{"token": <REDACTED>, "user": "bob"}');
     const jwt = ['eyJ' + 'a'.repeat(12), 'eyJ' + 'b'.repeat(12), 'c'.repeat(12)].join('.');
     assert.strictEqual(summarizeOutput(`Bearer ${jwt} done`), 'Bearer <REDACTED> done');
     assert.strictEqual(summarizeOutput('-----BEGIN RSA PRIVATE KEY-----\nMIIE...'), '<REDACTED>');
     assert.strictEqual(summarizeOutput(`ghu_${'C'.repeat(36)}`), '<REDACTED>');
-    assert.strictEqual(summarizeOutput('Unexpected tokens: 0, max_tokens=4096'), 'Unexpected tokens: 0, max_tokens=4096');
+    assert.strictEqual(summarizeOutput('Unexpected tokens: 0, max_tokens=4096, tokenizer=bpe, author=Jane'), 'Unexpected tokens: 0, max_tokens=4096, tokenizer=bpe, author=Jane');
   }) ? passed++ : failed++);
 
   (test('extracts file paths from nested arrays while filtering duplicates and remote URIs', () => {
