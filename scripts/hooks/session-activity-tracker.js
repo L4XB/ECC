@@ -30,23 +30,49 @@ const FILE_PATH_KEYS = new Set([
   'new_file_path',
 ]);
 
+// A name that carries a credential word anywhere (`AWS_SECRET_ACCESS_KEY`,
+// `DOCKER_AUTH_CONFIG`, Docker's `"auth":`), but not `max_tokens`, `tokenizer`
+// or `author`.
+const CREDENTIAL_WORD = /secret|token(?!s|iz)|passw(?:or)?d|api[_-]?key|access[_-]?key|private[_-]?key|credential|auth\b|auth[_-]?config/i;
+// A whole name and its separator. A name starts only where a run of name
+// characters starts, so each run is scanned once and long output stays linear
+// however long the name is.
+const ASSIGNMENT = /(?<![\w.-])([\w.-]+)(["']?)\s*([:=])\s*/g;
+// A quoted value may hold escaped quotes, and one that opens with { or [ is JSON
+// that can hold spaces, so it is redacted to the end. A bare value after a quoted
+// JSON key ends at the next field; any other (`NAME=a,b`, `secret: a,b`) runs to
+// the next space.
+const JSON_FIELD_VALUE = /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[{[].*|[^\s,;}\]"']+/y;
+const TEXT_VALUE = /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[{[].*|\S+/y;
+
+function redactCredentialValues(text) {
+  let redacted = '';
+  let copied = 0;
+  ASSIGNMENT.lastIndex = 0;
+  for (let match = ASSIGNMENT.exec(text); match; match = ASSIGNMENT.exec(text)) {
+    if (!CREDENTIAL_WORD.test(match[1])) continue;
+    const valueStart = match.index + match[0].length;
+    const valuePattern = match[2] && match[3] === ':' ? JSON_FIELD_VALUE : TEXT_VALUE;
+    valuePattern.lastIndex = valueStart;
+    const value = valuePattern.exec(text);
+    if (!value) continue;
+    redacted += `${text.slice(copied, valueStart)}<REDACTED>`;
+    copied = valueStart + value[0].length;
+    ASSIGNMENT.lastIndex = copied;
+  }
+  return redacted + text.slice(copied);
+}
+
 function redactSecrets(value) {
-  return String(value || '')
+  // The credential values cover what governance-capture detects, since tool
+  // output such as `cat .env` lands in these summaries too.
+  return redactCredentialValues(String(value || '')
     .replace(/\n/g, ' ')
     .replace(/--token[= ][^ ]*/g, '--token=<REDACTED>')
     .replace(/Authorization:[: ]*[^ ]*[: ]*[^ ]*/gi, 'Authorization:<REDACTED>')
     .replace(/\bAKIA[A-Z0-9]{16}\b/g, '<REDACTED>')
     .replace(/\bASIA[A-Z0-9]{16}\b/g, '<REDACTED>')
-    .replace(/password[= ][^ ]*/gi, 'password=<REDACTED>')
-    // The rest covers what governance-capture detects, since tool output such as
-    // `cat .env` lands in these summaries too.
-    // A name that carries a credential word anywhere (`AWS_SECRET_ACCESS_KEY`,
-    // `DOCKER_AUTH_CONFIG`, Docker's `"auth":`), but not `max_tokens`, `tokenizer`
-    // or `author`. The name parts around the word are bounded, which keeps long
-    // output linear. A quoted value may hold escaped quotes; a JSON value can hold
-    // spaces, so one that opens with { or [ is redacted to the end; a bare value
-    // ends at the next field.
-    .replace(/\b([\w.-]{0,64}(?:secret|token(?!s|iz)|passw(?:or)?d|api[_-]?key|access[_-]?key|private[_-]?key|credential|auth\b|auth[_-]?config)[\w.-]{0,64})(["']?\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[{[].*|[^\s,;}\]"']+)/gi, '$1$2<REDACTED>')
+    .replace(/password[= ][^ ]*/gi, 'password=<REDACTED>'))
     .replace(/\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, '<REDACTED>')
     .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----.*/g, '<REDACTED>')
     .replace(/\bgh[pousr]_[A-Za-z0-9_]+\b/g, '<REDACTED>')

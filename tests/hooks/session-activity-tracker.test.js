@@ -526,13 +526,23 @@ function runTests() {
     assert.strictEqual(summarizeOutput('-----BEGIN RSA PRIVATE KEY-----\nMIIE...'), '<REDACTED>');
     assert.strictEqual(summarizeOutput(`ghu_${'C'.repeat(36)}`), '<REDACTED>');
     assert.strictEqual(summarizeOutput('Unexpected tokens: 0, max_tokens=4096, tokenizer=bpe, author=Jane'), 'Unexpected tokens: 0, max_tokens=4096, tokenizer=bpe, author=Jane');
-    // A bare value ends at the next field, and a quoted one may hold escaped quotes.
+    // A bare value after a quoted JSON key ends at the next field, and a quoted one
+    // may hold escaped quotes.
     assert.strictEqual(summarizeOutput('{"token":null,"status":"failed","exit_code":1}'), '{"token":<REDACTED>,"status":"failed","exit_code":1}');
     assert.strictEqual(summarizeOutput('{"api_key":"part1\\" part2"}'), '{"api_key":<REDACTED>}');
+    // Any other bare value runs to the next space: a comma can be part of it.
+    assert.strictEqual(summarizeOutput('CLIENT_SECRET=alpha,beta DEBUG=1'), 'CLIENT_SECRET=<REDACTED> DEBUG=1');
+    assert.strictEqual(summarizeOutput('client_secret: alpha,beta'), 'client_secret: <REDACTED>');
+    // The whole name is checked, however long.
+    const longName = `API_KEY_${'A'.repeat(65)}`;
+    assert.strictEqual(summarizeOutput(`${longName}=example-secret-value`), `${longName}=<REDACTED>`);
+    assert.strictEqual(summarizeOutput(`${'A'.repeat(100)}_SECRET=example-secret-value`), `${'A'.repeat(100)}_SECRET=<REDACTED>`);
     // Separator-heavy output stays linear: unbounded name parts took seconds here.
-    const started = Date.now();
-    summarizeOutput('a.'.repeat(64000));
-    assert.ok(Date.now() - started < 2000, 'Redacting 128,000 characters should stay within its time budget');
+    for (const output of ['a.'.repeat(64000), 'secret'.repeat(21000), 'x.secret:'.repeat(14000), '"a":'.repeat(32000)]) {
+      const started = Date.now();
+      summarizeOutput(output);
+      assert.ok(Date.now() - started < 2000, `Redacting ${output.length} characters should stay within its time budget`);
+    }
   }) ? passed++ : failed++);
 
   (test('extracts file paths from nested arrays while filtering duplicates and remote URIs', () => {
