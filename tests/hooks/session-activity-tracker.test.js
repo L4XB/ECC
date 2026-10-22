@@ -524,6 +524,13 @@ function runTests() {
     assert.strictEqual(summarizeOutput('-----BEGIN RSA PRIVATE KEY-----\nMIIE...'), '<REDACTED>');
     assert.strictEqual(summarizeOutput(`ghu_${'C'.repeat(36)}`), '<REDACTED>');
     assert.strictEqual(summarizeOutput('Unexpected tokens: 0, max_tokens=4096, tokenizer=bpe, author=Jane'), 'Unexpected tokens: 0, max_tokens=4096, tokenizer=bpe, author=Jane');
+    // A bare value ends at the next field, and a quoted one may hold escaped quotes.
+    assert.strictEqual(summarizeOutput('{"token":null,"status":"failed","exit_code":1}'), '{"token":<REDACTED>,"status":"failed","exit_code":1}');
+    assert.strictEqual(summarizeOutput('{"api_key":"part1\\" part2"}'), '{"api_key":<REDACTED>}');
+    // Separator-heavy output stays linear: unbounded name parts took seconds here.
+    const started = Date.now();
+    summarizeOutput('a.'.repeat(64000));
+    assert.ok(Date.now() - started < 2000, 'Redacting 128,000 characters should stay within its time budget');
   }) ? passed++ : failed++);
 
   (test('extracts file paths from nested arrays while filtering duplicates and remote URIs', () => {
