@@ -110,5 +110,31 @@ test('single command no operators', () => {
   assert.deepStrictEqual(splitShellSegments('npm run dev'), ['npm run dev']);
 });
 
+// Newlines and here-documents
+console.log('\nNewlines and here-documents:');
+test('a newline splits into two segments', () => {
+  assert.deepStrictEqual(splitShellSegments('cd app\nnpm run dev'), ['cd app', 'npm run dev']);
+  assert.deepStrictEqual(splitShellSegments('a && b\n\nc'), ['a', 'b', 'c']);
+});
+test('an escaped or quoted newline does not split', () => {
+  assert.deepStrictEqual(splitShellSegments('npm run \\\ndev'), ['npm run \\\ndev']);
+  assert.deepStrictEqual(splitShellSegments('echo "a\nb"'), ['echo "a\nb"']);
+});
+test('a here-document body stays with its command', () => {
+  assert.deepStrictEqual(
+    splitShellSegments('cat <<EOF > notes.md\na && b\nnpm run dev\nEOF\nls'),
+    ['cat <<EOF > notes.md\na && b\nnpm run dev\nEOF', 'ls']
+  );
+  assert.deepStrictEqual(
+    splitShellSegments("cat <<-'END'\n\tnpm run dev\n\tEND\nls"),
+    ["cat <<-'END'\n\tnpm run dev\n\tEND", 'ls']
+  );
+  assert.deepStrictEqual(splitShellSegments('cat <<A <<B\na\nA\nb\nB\nnext'), ['cat <<A <<B\na\nA\nb\nB', 'next']);
+});
+test('a here-string or a shift is not a here-document', () => {
+  assert.deepStrictEqual(splitShellSegments('cat <<< x && y'), ['cat <<< x', 'y']);
+  assert.deepStrictEqual(splitShellSegments('echo $((x << 2))\nnext'), ['echo $((x << 2))', 'next']);
+});
+
 console.log(`\n=== Results: ${passed} passed, ${failed} failed ===`);
 if (failed > 0) process.exit(1);

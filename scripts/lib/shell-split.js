@@ -1,14 +1,43 @@
 'use strict';
 
+// `<<WORD`, `<<-WORD`, `<<'WORD'` or `<<"WORD"`. A delimiter starts with a letter or an
+// underscore, so a shift such as `$((x << 2))` is not read as a here-document.
+const HEREDOC_RE = /^<<(-?)[ \t]*(?:'([^'\n]*)'|"([^"\n]*)"|\\?([A-Za-z_][\w.-]*))/;
+
+// A here-document opener at `index`, but not a here-string (<<<).
+function heredocAt(command, index) {
+  if (command[index - 1] === '<' || command[index + 2] === '<') return null;
+  const match = HEREDOC_RE.exec(command.slice(index));
+  return match && { text: match[0], delimiter: match[2] ?? match[3] ?? match[4], stripTabs: match[1] === '-' };
+}
+
+// The end of the here-document bodies that start at `start`, one after the other.
+function endOfHeredocBodies(command, start, heredocs) {
+  let end = start;
+  for (const { delimiter, stripTabs } of heredocs) {
+    while (end < command.length) {
+      const newline = command.indexOf('\n', end);
+      const lineEnd = newline === -1 ? command.length : newline;
+      const line = command.slice(end, lineEnd);
+      end = lineEnd + 1;
+      if ((stripTabs ? line.replace(/^\t+/, '') : line) === delimiter) break;
+    }
+  }
+  return Math.min(end, command.length);
+}
+
 /**
- * Split a shell command into segments by operators (&&, ||, ;, &)
- * while respecting quoting (single/double) and escaped characters.
- * Redirection operators (&>, >&, 2>&1) are NOT treated as separators.
+ * Split a shell command into segments by operators (&&, ||, ;, &) and by
+ * newlines, while respecting quoting (single/double) and escaped characters.
+ * Redirection operators (&>, >&, 2>&1) are NOT treated as separators, and the
+ * body of a here-document stays in the segment of the command that reads it.
  */
 function splitShellSegments(command) {
   const segments = [];
   let current = '';
   let quote = null;
+  // Here-documents opened on the current line, read after its newline.
+  let heredocs = [];
 
   for (let i = 0; i < command.length; i++) {
     const ch = command[i];
@@ -41,6 +70,25 @@ function splitShellSegments(command) {
 
     const next = command[i + 1] || '';
     const prev = i > 0 ? command[i - 1] : '';
+
+    const heredoc = ch === '<' && next === '<' ? heredocAt(command, i) : null;
+    if (heredoc) {
+      heredocs.push(heredoc);
+      current += heredoc.text;
+      i += heredoc.text.length - 1;
+      continue;
+    }
+
+    // A newline ends a command, after the bodies of the here-documents opened on its line
+    if (ch === '\n') {
+      const end = endOfHeredocBodies(command, i + 1, heredocs);
+      current += command.slice(i, end);
+      i = end - 1;
+      heredocs = [];
+      if (current.trim()) segments.push(current.trim());
+      current = '';
+      continue;
+    }
 
     // && operator
     if (ch === '&' && next === '&') {
