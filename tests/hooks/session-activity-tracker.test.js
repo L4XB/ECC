@@ -498,6 +498,19 @@ function runTests() {
     assert.strictEqual(summarizeOutput(undefined), '');
     assert.strictEqual(summarizeOutput('hello\nworld'), 'hello world');
     assert.strictEqual(summarizeOutput({ ok: true }), '{"ok":true}');
+    // Claude Code sends the result as tool_response, for Bash { stdout, stderr, ... }.
+    assert.strictEqual(summarizeOutput({ stdout: `token ghp_${'A'.repeat(20)}`, stderr: '' }), 'token <REDACTED>');
+    const bashRow = buildActivityRow(
+      {
+        hook_event_name: 'PostToolUse',
+        session_id: 'sess-1',
+        tool_name: 'Bash',
+        tool_input: { command: 'npm test' },
+        tool_response: { stdout: '12 passing\n', stderr: 'warn: slow\n', interrupted: false, isImage: false },
+      },
+      {}
+    );
+    assert.strictEqual(bashRow.output_summary, '12 passing warn: slow');
   }) ? passed++ : failed++);
 
   (test('extracts file paths from nested arrays while filtering duplicates and remote URIs', () => {

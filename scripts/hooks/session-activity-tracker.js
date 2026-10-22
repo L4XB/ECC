@@ -12,6 +12,7 @@ const crypto = require('crypto');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const { sanitizeSessionId } = require('../lib/session-bridge');
+const { getToolResult } = require('./hook-input');
 const {
   appendFile,
   getClaudeDir,
@@ -558,6 +559,11 @@ function summarizeOutput(toolOutput) {
     return truncateSummary(toolOutput.output);
   }
 
+  // A Bash result from Claude Code: { stdout, stderr, interrupted, isImage }.
+  if (typeof toolOutput === 'object' && (typeof toolOutput.stdout === 'string' || typeof toolOutput.stderr === 'string')) {
+    return truncateSummary([toolOutput.stdout, toolOutput.stderr].filter(part => typeof part === 'string').join('\n'));
+  }
+
   return truncateSummary(JSON.stringify(toolOutput));
 }
 
@@ -603,7 +609,7 @@ function buildActivityRow(input, env = process.env) {
     tool_name: toolName,
     input_summary: summarizeInput(toolName, toolInput, filePaths),
     input_params_json: sanitizeInputParams(toolInput),
-    output_summary: summarizeOutput(input?.tool_output),
+    output_summary: summarizeOutput(getToolResult(input)),
     duration_ms: 0,
     file_paths: filePaths,
     file_events: fileEvents,
