@@ -1,5 +1,59 @@
 'use strict';
 
+// $'...' quoting, in which a backslash also escapes the closing quote
+const ANSI_C_QUOTED_RE = /\$'((?:\\[\s\S]|[^'\\])*)'/y;
+const ANSI_C_ESCAPES = { a: '\x07', b: '\b', e: '\x1b', E: '\x1b', f: '\f', n: '\n', r: '\r', t: '\t', v: '\v' };
+
+// The text of $'...' quoting with its escapes decoded, as Bash decodes them.
+function decodeAnsiC(text) {
+  return text.replace(/\\(x[0-9A-Fa-f]{1,2}|u[0-9A-Fa-f]{1,4}|U[0-9A-Fa-f]{1,8}|[0-7]{1,3}|c[\s\S]|[\s\S])/g, (escape, code) => {
+    if ('xuU'.includes(code[0]) && code.length > 1) {
+      const value = parseInt(code.slice(1), 16);
+      return value <= 0x10ffff ? String.fromCodePoint(value) : escape;
+    }
+    if (/^[0-7]/.test(code)) return String.fromCharCode(parseInt(code, 8) & 0xff);
+    if (code[0] === 'c' && code.length > 1) return String.fromCharCode(code.charCodeAt(1) & 0x1f);
+    return ANSI_C_ESCAPES[code] ?? (`\\'"?`.includes(code) ? code : escape);
+  });
+}
+
+// The shell word at `start`, up to an unquoted blank or operator character, with its quoting
+// removed, and whether any part of it was quoted. Null if a quote does not close.
+function readWord(command, start) {
+  let word = '';
+  let quote = null;
+  let quoted = false;
+  let i = start;
+  for (; i < command.length; i++) {
+    const ch = command[i];
+    ANSI_C_QUOTED_RE.lastIndex = i;
+    const ansiC = !quote && ch === '$' ? ANSI_C_QUOTED_RE.exec(command) : null;
+    if (quote) {
+      if (ch === quote) quote = null;
+      else word += ch;
+    } else if (ansiC) {
+      // $'...' decodes its escapes, so $'E\x4fF' is EOF
+      word += decodeAnsiC(ansiC[1]);
+      quoted = true;
+      i += ansiC[0].length - 1;
+    } else if (ch === "'" || ch === '"') {
+      quote = ch;
+      quoted = true;
+    } else if (ch === '$' && command[i + 1] === '"') {
+      // $"..." is double quoting; the $ is not part of the word
+      continue;
+    } else if (ch === '\\' && i + 1 < command.length) {
+      word += command[++i];
+      quoted = true;
+    } else if (/[\s|&;()<>]/.test(ch)) {
+      break;
+    } else {
+      word += ch;
+    }
+  }
+  return quote ? null : { word, quoted, end: i };
+}
+
 // A here-document opener at `index`, but not a here-string (<<<): `<<` or `<<-`, then the
 // delimiter, a shell word whose quotes are removed (`<<'EOF'`, `<<E"OF"`, `<<$'EOF'`,
 // `<<EOF/END`, `<<123`, and `<<''`, whose body ends at the first empty line). Unless part of the
@@ -10,31 +64,9 @@ function heredocAt(command, index) {
   const stripTabs = command[i] === '-';
   if (stripTabs) i++;
   while (command[i] === ' ' || command[i] === '\t') i++;
-  let delimiter = '';
-  let quote = null;
-  let quoted = false;
-  for (; i < command.length; i++) {
-    const ch = command[i];
-    if (quote) {
-      if (ch === quote) quote = null;
-      else delimiter += ch;
-    } else if (ch === "'" || ch === '"') {
-      quote = ch;
-      quoted = true;
-    } else if (ch === '$' && (command[i + 1] === "'" || command[i + 1] === '"')) {
-      // $'...' and $"..." are quoting too; the $ is not part of the word
-      continue;
-    } else if (ch === '\\' && i + 1 < command.length) {
-      delimiter += command[++i];
-      quoted = true;
-    } else if (/[\s|&;()<>]/.test(ch)) {
-      break;
-    } else {
-      delimiter += ch;
-    }
-  }
-  if ((!delimiter && !quoted) || quote) return null;
-  return { text: command.slice(index, i), delimiter, stripTabs, expands: !quoted };
+  const word = readWord(command, i);
+  if (!word || (!word.word && !word.quoted)) return null;
+  return { text: command.slice(index, word.end), delimiter: word.word, stripTabs, expands: !word.quoted };
 }
 
 // The index after the `)` that closes the `(` at `index`, or -1. Quoted parentheses and escaped

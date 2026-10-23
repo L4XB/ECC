@@ -246,6 +246,11 @@ function runTests() {
     assert.strictEqual(result.code, 0, `Expected exit code 0, got ${result.code}`);
   }) ? passed++ : failed++);
 
+  (test('allows a here-document body whose ANSI-C quoted delimiter has an escape', () => {
+    const result = runScript("cat <<$'E\\x4fF'\nE\\x4fF\nnpm run dev\nEOF");
+    assert.strictEqual(result.code, 0, `Expected exit code 0, got ${result.code}`);
+  }) ? passed++ : failed++);
+
   (test('allows a here-document body fed to a package manager command', () => {
     const result = runScript('npm --version <<EOF && cat\nnpm run dev\nEOF');
     assert.strictEqual(result.code, 0, `Expected exit code 0, got ${result.code}`);
