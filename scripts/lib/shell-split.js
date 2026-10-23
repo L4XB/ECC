@@ -1,14 +1,31 @@
 'use strict';
 
-// `<<WORD`, `<<-WORD`, `<<'WORD'` or `<<"WORD"`. A delimiter starts with a letter or an
-// underscore, so a shift such as `$((x << 2))` is not read as a here-document.
-const HEREDOC_RE = /^<<(-?)[ \t]*(?:'([^'\n]*)'|"([^"\n]*)"|\\?([A-Za-z_][\w.-]*))/;
-
-// A here-document opener at `index`, but not a here-string (<<<).
+// A here-document opener at `index`, but not a here-string (<<<): `<<` or `<<-`, then the
+// delimiter, a shell word whose quotes are removed (`<<'EOF'`, `<<E"OF"`, `<<EOF/END`, `<<123`).
 function heredocAt(command, index) {
   if (command[index - 1] === '<' || command[index + 2] === '<') return null;
-  const match = HEREDOC_RE.exec(command.slice(index));
-  return match && { text: match[0], delimiter: match[2] ?? match[3] ?? match[4], stripTabs: match[1] === '-' };
+  let i = index + 2;
+  const stripTabs = command[i] === '-';
+  if (stripTabs) i++;
+  while (command[i] === ' ' || command[i] === '\t') i++;
+  let delimiter = '';
+  let quote = null;
+  for (; i < command.length; i++) {
+    const ch = command[i];
+    if (quote) {
+      if (ch === quote) quote = null;
+      else delimiter += ch;
+    } else if (ch === "'" || ch === '"') {
+      quote = ch;
+    } else if (ch === '\\' && i + 1 < command.length) {
+      delimiter += command[++i];
+    } else if (/[\s|&;()<>]/.test(ch)) {
+      break;
+    } else {
+      delimiter += ch;
+    }
+  }
+  return delimiter && !quote ? { text: command.slice(index, i), delimiter, stripTabs } : null;
 }
 
 // The index after the `))` that closes the arithmetic `((` at `index`, or -1.
@@ -45,6 +62,22 @@ function endOfHeredocBodies(command, start, heredocs) {
     }
   }
   return Math.min(end, command.length);
+}
+
+// At the newline at `index` the command ends, after the bodies of the here-documents opened on
+// its line. The bodies are data, so they go with the command that opened the first of them, even
+// when an operator after it (`cat <<EOF &&`) already ended its segment. Returns the index after
+// the bodies.
+function endLine(command, index, current, heredocs, segments) {
+  const end = endOfHeredocBodies(command, index + 1, heredocs);
+  let bodies = command.slice(index, end);
+  if (heredocs.length > 0 && heredocs[0].segment < segments.length) {
+    segments[heredocs[0].segment] += bodies.trimEnd();
+    bodies = '';
+  }
+  const rest = (current + bodies).trim();
+  if (rest) segments.push(rest);
+  return end;
 }
 
 /**
@@ -101,7 +134,7 @@ function splitShellSegments(command) {
 
     const heredoc = ch === '<' && next === '<' ? heredocAt(command, i) : null;
     if (heredoc) {
-      heredocs.push(heredoc);
+      heredocs.push({ ...heredoc, segment: segments.length });
       current += heredoc.text;
       i += heredoc.text.length - 1;
       continue;
@@ -109,11 +142,8 @@ function splitShellSegments(command) {
 
     // A newline ends a command, after the bodies of the here-documents opened on its line
     if (ch === '\n') {
-      const end = endOfHeredocBodies(command, i + 1, heredocs);
-      current += command.slice(i, end);
-      i = end - 1;
+      i = endLine(command, i, current, heredocs, segments) - 1;
       heredocs = [];
-      if (current.trim()) segments.push(current.trim());
       current = '';
       continue;
     }

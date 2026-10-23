@@ -142,6 +142,24 @@ test('a << in a comment is not a here-document, and a comment is not split', () 
   assert.deepStrictEqual(splitShellSegments('echo hi # a && b'), ['echo hi # a && b']);
   assert.deepStrictEqual(splitShellSegments('echo a#b ${#x} && c'), ['echo a#b ${#x}', 'c']);
 });
+test('a here-document delimiter is a shell word, read without its quotes', () => {
+  assert.deepStrictEqual(
+    splitShellSegments('cat <<EOF/END\nnpm run dev\nEOF/END\nls'),
+    ['cat <<EOF/END\nnpm run dev\nEOF/END', 'ls']
+  );
+  assert.deepStrictEqual(splitShellSegments('cat <<E"OF"\nnpm run dev\nEOF\nls'), ['cat <<E"OF"\nnpm run dev\nEOF', 'ls']);
+  assert.deepStrictEqual(splitShellSegments('cat <<123\nnpm run dev\n123\nls'), ['cat <<123\nnpm run dev\n123', 'ls']);
+});
+test('a here-document body stays with its command after an operator ends the segment', () => {
+  assert.deepStrictEqual(
+    splitShellSegments('cat <<EOF &&\nnpm run dev\nEOF\necho done'),
+    ['cat <<EOF\nnpm run dev\nEOF', 'echo done']
+  );
+  assert.deepStrictEqual(
+    splitShellSegments('cat <<EOF && npm run build\nnpm run dev\nEOF'),
+    ['cat <<EOF\nnpm run dev\nEOF', 'npm run build']
+  );
+});
 test('a here-document delimiter on a CRLF line still ends the body', () => {
   assert.deepStrictEqual(
     splitShellSegments('cat <<EOF\r\ntext\r\nEOF\r\nnpm run dev'),

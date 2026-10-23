@@ -229,6 +229,11 @@ function runTests() {
     assert.strictEqual(result.code, 0, `Expected exit code 0, got ${result.code}`);
   }) ? passed++ : failed++);
 
+  (test('allows a here-document body that follows an operator', () => {
+    const result = runScript('cat <<EOF &&\nnpm run dev\nEOF\necho done');
+    assert.strictEqual(result.code, 0, `Expected exit code 0, got ${result.code}`);
+  }) ? passed++ : failed++);
+
   // --- Edge cases ---
 
   (test('empty/invalid input passes through (exit code 0)', () => {
