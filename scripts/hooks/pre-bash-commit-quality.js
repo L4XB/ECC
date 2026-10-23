@@ -167,6 +167,25 @@ function findFileIssues(filePath) {
 }
 
 /**
+ * The body of the here-document that `value` starts with, as in `$(cat <<'EOF'`, or null.
+ * It ends at the line that holds only the delimiter, after leading tabs for <<-, which also
+ * strips them from the body.
+ * @param {string} value
+ * @returns {string|null}
+ */
+function heredocBody(value) {
+  const opener = /^\$\(\s*cat\s+<<(-?)\s*(['"]?)([A-Za-z_][\w.-]*)\2[ \t]*\r?\n/.exec(value);
+  if (!opener) return null;
+  const [, stripTabs, , delimiter] = opener;
+  const lines = value.slice(opener[0].length).split('\n').map(line => {
+    const text = line.replace(/\r$/, '');
+    return stripTabs ? text.replace(/^\t+/, '') : text;
+  });
+  const end = lines.indexOf(delimiter);
+  return end === -1 ? null : lines.slice(0, end).join('\n');
+}
+
+/**
  * Validate commit message format
  * @param {string} command 
  * @returns {object|null} Validation result or null if no message to validate
@@ -175,15 +194,16 @@ function validateCommitMessage(command) {
   // Extract commit message from command (quote-aware: when quoted, capture to the
   // matching closing quote, consuming escaped chars (\") so an embedded escaped
   // quote does not truncate the subject, and allowing the OTHER quote char inside
-  // the body; when unquoted, capture the full remaining tail, not just the first token).
-  // A message written as -m "$(cat <<'EOF' ... EOF)", as Claude Code writes them, is
-  // the body of that here-document.
-  const messageMatch = command.match(/(?:-m|--message)[=\s]+(?:"\$\(\s*cat\s+<<(?<stripTabs>-?)\s*(?<quote>['"]?)(?<delimiter>[A-Za-z_][\w.-]*)\k<quote>[ \t]*\r?\n(?<heredoc>[\s\S]*?)\r?\n[ \t]*\k<delimiter>[ \t]*\r?(?:\n|$)|"(?<double>(?:\\.|[^"\\])*)"|'(?<single>(?:\\.|[^'\\])*)'|(?<bare>[^"']+?)\s*$)/);
+  // the body; when unquoted, capture the full remaining tail, not just the first token)
+  const messageMatch = command.match(/(?:-m|--message)[=\s]+(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^"']+?)\s*$)/);
   if (!messageMatch) return null;
   
-  const { stripTabs, heredoc, double, single, bare } = messageMatch.groups;
-  // <<- strips the leading tabs of each line of the here-document
-  const message = stripTabs ? heredoc.replace(/^\t+/gm, '') : heredoc ?? double ?? single ?? bare;
+  // A message written as -m "$(cat <<'EOF' ... EOF)", as Claude Code writes them, is the
+  // body of that here-document. It is read from the command itself, since it may hold quotes.
+  const heredoc = messageMatch[1]?.startsWith('$(')
+    ? heredocBody(command.slice(messageMatch.index + messageMatch[0].indexOf('"') + 1))
+    : null;
+  const message = heredoc ?? messageMatch[1] ?? messageMatch[2] ?? messageMatch[3];
   // The format rules apply to the subject: git drops leading blank lines and trailing
   // whitespace, and the first line left is the subject.
   const subject = (message.split('\n').find(line => line.trim()) || '').trimEnd();
