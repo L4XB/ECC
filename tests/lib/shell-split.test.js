@@ -140,6 +140,7 @@ test('a here-document delimiter is a shell word, read without its quotes', () =>
   assert.deepStrictEqual(splitShellSegments('cat <<EOF/END\nnpm run dev\nEOF/END\nls'), ['cat <<EOF/END', 'ls']);
   assert.deepStrictEqual(splitShellSegments('cat <<E"OF"\nnpm run dev\nEOF\nls'), ['cat <<E"OF"', 'ls']);
   assert.deepStrictEqual(splitShellSegments('cat <<123\nnpm run dev\n123\nls'), ['cat <<123', 'ls']);
+  assert.deepStrictEqual(splitShellSegments("cat <<$'EOF'\ntext\nEOF\nnpm run dev"), ["cat <<$'EOF'", 'npm run dev']);
   // An empty delimiter ends the body at the first empty line
   assert.deepStrictEqual(splitShellSegments("cat <<''\nnpm run dev\n\nls"), ["cat <<''", 'ls']);
 });

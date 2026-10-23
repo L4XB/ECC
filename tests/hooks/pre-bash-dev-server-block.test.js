@@ -223,6 +223,11 @@ function runTests() {
       assert.strictEqual(result.code, 2, `Expected exit code 2, got ${result.code}`);
     }) ? passed++ : failed++);
 
+    (test('blocks a dev server after a here-document with an ANSI-C quoted delimiter', () => {
+      const result = runScript("cat <<$'EOF'\ntext\nEOF\nnpm run dev");
+      assert.strictEqual(result.code, 2, `Expected exit code 2, got ${result.code}`);
+    }) ? passed++ : failed++);
+
     (test('blocks a dev server started by a substitution in a here-document body', () => {
       for (const command of ["npm --version <<EOF\n'$(npm run dev)'\nEOF", "cat <<EOF\n'$(npm run dev)'\nEOF"]) {
         const result = runScript(command);

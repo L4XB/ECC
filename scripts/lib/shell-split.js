@@ -1,9 +1,9 @@
 'use strict';
 
 // A here-document opener at `index`, but not a here-string (<<<): `<<` or `<<-`, then the
-// delimiter, a shell word whose quotes are removed (`<<'EOF'`, `<<E"OF"`, `<<EOF/END`, `<<123`,
-// and `<<''`, whose body ends at the first empty line). Unless part of the word is quoted, Bash
-// expands the body, so its command substitutions run.
+// delimiter, a shell word whose quotes are removed (`<<'EOF'`, `<<E"OF"`, `<<$'EOF'`,
+// `<<EOF/END`, `<<123`, and `<<''`, whose body ends at the first empty line). Unless part of the
+// word is quoted, Bash expands the body, so its command substitutions run.
 function heredocAt(command, index) {
   if (command[index - 1] === '<' || command[index + 2] === '<') return null;
   let i = index + 2;
@@ -21,6 +21,9 @@ function heredocAt(command, index) {
     } else if (ch === "'" || ch === '"') {
       quote = ch;
       quoted = true;
+    } else if (ch === '$' && (command[i + 1] === "'" || command[i + 1] === '"')) {
+      // $'...' and $"..." are quoting too; the $ is not part of the word
+      continue;
     } else if (ch === '\\' && i + 1 < command.length) {
       delimiter += command[++i];
       quoted = true;
