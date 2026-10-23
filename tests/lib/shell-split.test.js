@@ -120,16 +120,10 @@ test('an escaped or quoted newline does not split', () => {
   assert.deepStrictEqual(splitShellSegments('npm run \\\ndev'), ['npm run \\\ndev']);
   assert.deepStrictEqual(splitShellSegments('echo "a\nb"'), ['echo "a\nb"']);
 });
-test('a here-document body stays with its command', () => {
-  assert.deepStrictEqual(
-    splitShellSegments('cat <<EOF > notes.md\na && b\nnpm run dev\nEOF\nls'),
-    ['cat <<EOF > notes.md\na && b\nnpm run dev\nEOF', 'ls']
-  );
-  assert.deepStrictEqual(
-    splitShellSegments("cat <<-'END'\n\tnpm run dev\n\tEND\nls"),
-    ["cat <<-'END'\n\tnpm run dev\n\tEND", 'ls']
-  );
-  assert.deepStrictEqual(splitShellSegments('cat <<A <<B\na\nA\nb\nB\nnext'), ['cat <<A <<B\na\nA\nb\nB', 'next']);
+test('a here-document body is data, left out of the segments', () => {
+  assert.deepStrictEqual(splitShellSegments('cat <<EOF > notes.md\na && b\nnpm run dev\nEOF\nls'), ['cat <<EOF > notes.md', 'ls']);
+  assert.deepStrictEqual(splitShellSegments("cat <<-'END'\n\tnpm run dev\n\tEND\nls"), ["cat <<-'END'", 'ls']);
+  assert.deepStrictEqual(splitShellSegments('cat <<A <<B\na\nA\nb\nB\nnext'), ['cat <<A <<B', 'next']);
 });
 test('a here-string or a shift is not a here-document', () => {
   assert.deepStrictEqual(splitShellSegments('cat <<< x && y'), ['cat <<< x', 'y']);
@@ -143,28 +137,18 @@ test('a << in a comment is not a here-document, and a comment is not split', () 
   assert.deepStrictEqual(splitShellSegments('echo a#b ${#x} && c'), ['echo a#b ${#x}', 'c']);
 });
 test('a here-document delimiter is a shell word, read without its quotes', () => {
-  assert.deepStrictEqual(
-    splitShellSegments('cat <<EOF/END\nnpm run dev\nEOF/END\nls'),
-    ['cat <<EOF/END\nnpm run dev\nEOF/END', 'ls']
-  );
-  assert.deepStrictEqual(splitShellSegments('cat <<E"OF"\nnpm run dev\nEOF\nls'), ['cat <<E"OF"\nnpm run dev\nEOF', 'ls']);
-  assert.deepStrictEqual(splitShellSegments('cat <<123\nnpm run dev\n123\nls'), ['cat <<123\nnpm run dev\n123', 'ls']);
+  assert.deepStrictEqual(splitShellSegments('cat <<EOF/END\nnpm run dev\nEOF/END\nls'), ['cat <<EOF/END', 'ls']);
+  assert.deepStrictEqual(splitShellSegments('cat <<E"OF"\nnpm run dev\nEOF\nls'), ['cat <<E"OF"', 'ls']);
+  assert.deepStrictEqual(splitShellSegments('cat <<123\nnpm run dev\n123\nls'), ['cat <<123', 'ls']);
+  // An empty delimiter ends the body at the first empty line
+  assert.deepStrictEqual(splitShellSegments("cat <<''\nnpm run dev\n\nls"), ["cat <<''", 'ls']);
 });
-test('a here-document body stays with its command after an operator ends the segment', () => {
-  assert.deepStrictEqual(
-    splitShellSegments('cat <<EOF &&\nnpm run dev\nEOF\necho done'),
-    ['cat <<EOF\nnpm run dev\nEOF', 'echo done']
-  );
-  assert.deepStrictEqual(
-    splitShellSegments('cat <<EOF && npm run build\nnpm run dev\nEOF'),
-    ['cat <<EOF\nnpm run dev\nEOF', 'npm run build']
-  );
+test('a here-document body after an operator is left out too', () => {
+  assert.deepStrictEqual(splitShellSegments('cat <<EOF &&\nnpm run dev\nEOF\necho done'), ['cat <<EOF', 'echo done']);
+  assert.deepStrictEqual(splitShellSegments('npm --version <<EOF && cat\nnpm run dev\nEOF'), ['npm --version <<EOF', 'cat']);
 });
 test('a here-document delimiter on a CRLF line still ends the body', () => {
-  assert.deepStrictEqual(
-    splitShellSegments('cat <<EOF\r\ntext\r\nEOF\r\nnpm run dev'),
-    ['cat <<EOF\r\ntext\r\nEOF', 'npm run dev']
-  );
+  assert.deepStrictEqual(splitShellSegments('cat <<EOF\r\ntext\r\nEOF\r\nnpm run dev'), ['cat <<EOF', 'npm run dev']);
 });
 
 console.log(`\n=== Results: ${passed} passed, ${failed} failed ===`);

@@ -1,7 +1,8 @@
 'use strict';
 
 // A here-document opener at `index`, but not a here-string (<<<): `<<` or `<<-`, then the
-// delimiter, a shell word whose quotes are removed (`<<'EOF'`, `<<E"OF"`, `<<EOF/END`, `<<123`).
+// delimiter, a shell word whose quotes are removed (`<<'EOF'`, `<<E"OF"`, `<<EOF/END`, `<<123`,
+// and `<<''`, whose body ends at the first empty line).
 function heredocAt(command, index) {
   if (command[index - 1] === '<' || command[index + 2] === '<') return null;
   let i = index + 2;
@@ -10,6 +11,7 @@ function heredocAt(command, index) {
   while (command[i] === ' ' || command[i] === '\t') i++;
   let delimiter = '';
   let quote = null;
+  let quoted = false;
   for (; i < command.length; i++) {
     const ch = command[i];
     if (quote) {
@@ -17,6 +19,7 @@ function heredocAt(command, index) {
       else delimiter += ch;
     } else if (ch === "'" || ch === '"') {
       quote = ch;
+      quoted = true;
     } else if (ch === '\\' && i + 1 < command.length) {
       delimiter += command[++i];
     } else if (/[\s|&;()<>]/.test(ch)) {
@@ -25,7 +28,7 @@ function heredocAt(command, index) {
       delimiter += ch;
     }
   }
-  return delimiter && !quote ? { text: command.slice(index, i), delimiter, stripTabs } : null;
+  return (delimiter || quoted) && !quote ? { text: command.slice(index, i), delimiter, stripTabs } : null;
 }
 
 // The index after the `))` that closes the arithmetic `((` at `index`, or -1.
@@ -64,27 +67,19 @@ function endOfHeredocBodies(command, start, heredocs) {
   return Math.min(end, command.length);
 }
 
-// At the newline at `index` the command ends, after the bodies of the here-documents opened on
-// its line. The bodies are data, so they go with the command that opened the first of them, even
-// when an operator after it (`cat <<EOF &&`) already ended its segment. Returns the index after
-// the bodies.
+// At the newline at `index` the command ends. The bodies of the here-documents opened on its
+// line follow it. They are data, not commands, so they are left out of the segments. Returns the
+// index after the bodies.
 function endLine(command, index, current, heredocs, segments) {
-  const end = endOfHeredocBodies(command, index + 1, heredocs);
-  let bodies = command.slice(index, end);
-  if (heredocs.length > 0 && heredocs[0].segment < segments.length) {
-    segments[heredocs[0].segment] += bodies.trimEnd();
-    bodies = '';
-  }
-  const rest = (current + bodies).trim();
-  if (rest) segments.push(rest);
-  return end;
+  if (current.trim()) segments.push(current.trim());
+  return endOfHeredocBodies(command, index + 1, heredocs);
 }
 
 /**
  * Split a shell command into segments by operators (&&, ||, ;, &) and by
  * newlines, while respecting quoting (single/double) and escaped characters.
  * Redirection operators (&>, >&, 2>&1) are NOT treated as separators, and the
- * body of a here-document stays in the segment of the command that reads it.
+ * body of a here-document, which is data, is left out of the segments.
  */
 function splitShellSegments(command) {
   const segments = [];
@@ -134,7 +129,7 @@ function splitShellSegments(command) {
 
     const heredoc = ch === '<' && next === '<' ? heredocAt(command, i) : null;
     if (heredoc) {
-      heredocs.push({ ...heredoc, segment: segments.length });
+      heredocs.push(heredoc);
       current += heredoc.text;
       i += heredoc.text.length - 1;
       continue;
