@@ -183,6 +183,15 @@ test('an expanded here-document body joins a line that ends in an escaping backs
 test('a # after an escaped blank does not start a comment', () => {
   assert.deepStrictEqual(splitShellSegments('echo foo\\ # && npm run dev'), ['echo foo\\ #', 'npm run dev']);
   assert.deepStrictEqual(splitShellSegments('echo foo # && npm run dev'), ['echo foo # && npm run dev']);
+  // An escaped backslash leaves the blank after it unescaped
+  assert.deepStrictEqual(splitShellSegments('echo a\\\\ # && npm run dev'), ['echo a\\\\ # && npm run dev']);
+});
+test('a # after a line continuation is read as bash reads the joined line', () => {
+  // Bash drops the backslash-newline, so the blank before it makes # start a comment
+  assert.deepStrictEqual(splitShellSegments('echo \\\n# <<EOF\ntrue && npm run dev'), ['echo \\\n# <<EOF', 'true', 'npm run dev']);
+  // Without a blank before the continuation, # is part of the word
+  assert.deepStrictEqual(splitShellSegments('echo foo\\\n#bar && npm run dev'), ['echo foo\\\n#bar', 'npm run dev']);
+  assert.deepStrictEqual(splitShellSegments('echo foo\\ \\\n# x && npm run dev'), ['echo foo\\ \\\n# x', 'npm run dev']);
 });
 
 console.log(`\n=== Results: ${passed} passed, ${failed} failed ===`);

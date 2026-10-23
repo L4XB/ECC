@@ -137,6 +137,25 @@ function commandSubstitutions(body) {
   return commands;
 }
 
+// Whether the character at `index` is escaped by an odd run of backslashes before it.
+function isEscaped(command, index) {
+  let count = 0;
+  for (let i = index - 1; i >= 0 && command[i] === '\\'; i--) count++;
+  return count % 2 === 1;
+}
+
+// Whether the character at `index` starts a word: it is the first of the command, or it follows an
+// unescaped blank or operator character. Bash removes a backslash-newline pair first, so the
+// character before the pair is the one that counts.
+function startsWord(command, index, current) {
+  if (current === '') return true;
+  let before = index - 1;
+  while (before >= 1 && command[before] === '\n' && command[before - 1] === '\\' && !isEscaped(command, before - 1)) {
+    before -= 2;
+  }
+  return before < 0 || (/[\s;&|(]/.test(command[before]) && !isEscaped(command, before));
+}
+
 // The end of a span copied as is, or -1: a comment, which runs to the end of its line, or an
 // arithmetic expression such as $((x << n)), whose `<<` is a shift and `&&` an operator.
 function literalSpanEnd(command, index, atWordStart) {
@@ -210,8 +229,6 @@ function splitShellSegments(command) {
   let quote = null;
   // Here-documents opened on the current line, read after its newline.
   let heredocs = [];
-  // The index of the last character a backslash escaped outside quotes.
-  let escaped = -1;
 
   for (let i = 0; i < command.length; i++) {
     const ch = command[i];
@@ -232,7 +249,6 @@ function splitShellSegments(command) {
     if (ch === '\\' && i + 1 < command.length) {
       current += ch + command[i + 1];
       i++;
-      escaped = i;
       continue;
     }
 
@@ -246,8 +262,7 @@ function splitShellSegments(command) {
     const next = command[i + 1] || '';
     const prev = i > 0 ? command[i - 1] : '';
 
-    const atWordStart = current === '' || (/[\s;&|(]/.test(prev) && escaped !== i - 1);
-    const spanEnd = literalSpanEnd(command, i, atWordStart);
+    const spanEnd = literalSpanEnd(command, i, ch === '#' && startsWord(command, i, current));
     if (spanEnd !== -1) {
       current += command.slice(i, spanEnd);
       i = spanEnd - 1;
