@@ -828,6 +828,18 @@ function groupSources(scope, budget) {
   return written;
 }
 
+// printf writes the whitespace escapes of its format as the characters they
+// name, so `printf 'git push --no-verify\n'` ends its flag at the newline. As for
+// $'...' in shell-scan, only word boundaries are decoded, not numeric escapes.
+const PRINTF_SPACE_ESCAPES = { n: '\n', t: '\t', r: '\r', v: '\v', f: '\f', '\\': '\\' };
+
+function printfText(words) {
+  const format = words[1]?.value || '';
+  if (format === '%s' || format === '%s\\n') return words.slice(2).map(word => word.value).join('\n');
+  const decoded = format.replace(/\\([ntrvf\\])/g, (escape, c) => PRINTF_SPACE_ESCAPES[c]);
+  return [decoded, ...words.slice(2).map(word => word.value)].join(' ');
+}
+
 // Literal producers only. Unmodeled transformations remain conservative rather
 // than executing a formatter, interpreter, shell or user-supplied command.
 function pipelineSources(command, budget) {
@@ -839,10 +851,7 @@ function pipelineSources(command, budget) {
     for (const word of words) budget.spend(word.value.length + 3);
     const name = basename(words[0]?.value || '');
     if (name === 'echo') sources.push({ text: words.slice(1).filter(word => !/^-[neE]+$/.test(word.value)).map(word => word.value).join(' ') });
-    if (name === 'printf') {
-      const format = words[1]?.value || '';
-      if (format !== '-v') sources.push({ text: (format === '%s' || format === '%s\\n') ? words.slice(2).map(word => word.value).join('\n') : words.slice(1).map(word => word.value).join(' ') });
-    }
+    if (name === 'printf' && words[1]?.value !== '-v') sources.push({ text: printfText(words) });
     if (!DATA_COMMANDS.has(name)) {
       // Foreign transformations can introduce literal bypasses into executable
       // stdin. Treat their punctuation as delimiters, not as proved shell syntax.
