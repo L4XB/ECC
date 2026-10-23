@@ -37,8 +37,9 @@ function decodeAnsiC(text) {
   }
 }
 
-// The shell word at `start`, up to an unquoted blank or operator character, with its quoting
-// removed, and whether any part of it was quoted. Null if a quote does not close. The word is
+// The shell word at `start`, up to an unquoted space, tab, newline or operator character, with
+// its quoting removed, and whether any part of it was quoted. As in Bash, a carriage return is
+// part of the word. Null if a quote does not close. The word is
 // null when it holds bytes that are not UTF-8: no line of the command can then be equal to it.
 function readWord(command, start) {
   let word = '';
@@ -69,7 +70,7 @@ function readWord(command, start) {
     } else if (ch === '\\' && i + 1 < command.length) {
       word += command[++i];
       quoted = true;
-    } else if (/[\s|&;()<>]/.test(ch)) {
+    } else if (/[ \t\n|&;()<>]/.test(ch)) {
       break;
     } else {
       word += ch;
@@ -146,6 +147,13 @@ function literalSpanEnd(command, index, atWordStart) {
   return command[index] === '(' && command[index + 1] === '(' ? endOfArithmetic(command, index) : -1;
 }
 
+// Whether `text` ends in an odd number of backslashes, the last of which escapes what follows.
+function endsInEscape(text) {
+  let count = 0;
+  while (count < text.length && text[text.length - 1 - count] === '\\') count++;
+  return count % 2 === 1;
+}
+
 // The here-document bodies that start at `start`, one after the other: the index after them,
 // and the commands that the expanded ones run through command substitution.
 function readHeredocBodies(command, start, heredocs) {
@@ -155,12 +163,21 @@ function readHeredocBodies(command, start, heredocs) {
     const bodyStart = end;
     let bodyEnd = command.length;
     while (end < command.length) {
-      const newline = command.indexOf('\n', end);
-      const lineEnd = newline === -1 ? command.length : newline;
-      // A CRLF line ends in \r, which is not part of the delimiter.
-      const line = command.slice(end, lineEnd).replace(/\r$/, '');
       const lineStart = end;
-      end = lineEnd + 1;
+      let line = '';
+      for (;;) {
+        const newline = command.indexOf('\n', end);
+        const lineEnd = newline === -1 ? command.length : newline;
+        const part = command.slice(end, lineEnd);
+        end = lineEnd + 1;
+        // In an expanded body, Bash joins a line that ends in an escaping backslash with the
+        // next one before it compares the line with the delimiter.
+        if (!expands || newline === -1 || !endsInEscape(part)) {
+          line += part;
+          break;
+        }
+        line += part.slice(0, -1);
+      }
       if ((stripTabs ? line.replace(/^\t+/, '') : line) === delimiter) {
         bodyEnd = lineStart;
         break;
@@ -193,6 +210,8 @@ function splitShellSegments(command) {
   let quote = null;
   // Here-documents opened on the current line, read after its newline.
   let heredocs = [];
+  // The index of the last character a backslash escaped outside quotes.
+  let escaped = -1;
 
   for (let i = 0; i < command.length; i++) {
     const ch = command[i];
@@ -213,6 +232,7 @@ function splitShellSegments(command) {
     if (ch === '\\' && i + 1 < command.length) {
       current += ch + command[i + 1];
       i++;
+      escaped = i;
       continue;
     }
 
@@ -226,7 +246,8 @@ function splitShellSegments(command) {
     const next = command[i + 1] || '';
     const prev = i > 0 ? command[i - 1] : '';
 
-    const spanEnd = literalSpanEnd(command, i, current === '' || /[\s;&|(]/.test(prev));
+    const atWordStart = current === '' || (/[\s;&|(]/.test(prev) && escaped !== i - 1);
+    const spanEnd = literalSpanEnd(command, i, atWordStart);
     if (spanEnd !== -1) {
       current += command.slice(i, spanEnd);
       i = spanEnd - 1;

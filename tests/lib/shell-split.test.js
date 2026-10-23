@@ -171,6 +171,18 @@ test('a here-document body after an operator is left out too', () => {
 });
 test('a here-document delimiter on a CRLF line still ends the body', () => {
   assert.deepStrictEqual(splitShellSegments('cat <<EOF\r\ntext\r\nEOF\r\nnpm run dev'), ['cat <<EOF', 'npm run dev']);
+  // The \r is part of the line, so after an LF delimiter a CRLF line does not end the body
+  assert.deepStrictEqual(splitShellSegments('cat <<EOF\nEOF\r\nnpm run dev\nEOF'), ['cat <<EOF']);
+});
+test('an expanded here-document body joins a line that ends in an escaping backslash', () => {
+  assert.deepStrictEqual(splitShellSegments('cat <<EOF\nbody\nEO\\\nF\nnpm run dev'), ['cat <<EOF', 'npm run dev']);
+  // An escaped backslash does not join, and a quoted delimiter keeps the lines as they are
+  assert.deepStrictEqual(splitShellSegments('cat <<EOF\nEOF\\\\\nnpm run dev\nEOF'), ['cat <<EOF']);
+  assert.deepStrictEqual(splitShellSegments("cat <<'EOF'\nEO\\\nF\nEOF\nnpm run dev"), ["cat <<'EOF'", 'npm run dev']);
+});
+test('a # after an escaped blank does not start a comment', () => {
+  assert.deepStrictEqual(splitShellSegments('echo foo\\ # && npm run dev'), ['echo foo\\ #', 'npm run dev']);
+  assert.deepStrictEqual(splitShellSegments('echo foo # && npm run dev'), ['echo foo # && npm run dev']);
 });
 
 console.log(`\n=== Results: ${passed} passed, ${failed} failed ===`);
