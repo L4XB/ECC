@@ -833,9 +833,18 @@ function groupSources(scope, budget) {
 // $'...' in shell-scan, only word boundaries are decoded, not numeric escapes.
 const PRINTF_SPACE_ESCAPES = { n: '\n', t: '\t', r: '\r', v: '\v', f: '\f', '\\': '\\' };
 
+// echo ends its output with a newline unless an -n option asks it not to, so
+// two echoes in a group write two lines, not one joined command.
+function echoText(words) {
+  const options = words.slice(1).filter(word => /^-[neE]+$/.test(word.value));
+  const text = words.slice(1).filter(word => !options.includes(word)).map(word => word.value).join(' ');
+  return options.some(word => word.value.includes('n')) ? text : `${text}\n`;
+}
+
 function printfText(words) {
   const format = words[1]?.value || '';
-  if (format === '%s' || format === '%s\\n') return words.slice(2).map(word => word.value).join('\n');
+  if (format === '%s') return words.slice(2).map(word => word.value).join('\n');
+  if (format === '%s\\n') return words.slice(2).map(word => `${word.value}\n`).join('');
   const decoded = format.replace(/\\([ntrvf\\])/g, (escape, c) => PRINTF_SPACE_ESCAPES[c]);
   return [decoded, ...words.slice(2).map(word => word.value)].join(' ');
 }
@@ -850,7 +859,7 @@ function pipelineSources(command, budget) {
     const { words } = executableWords(current.words, budget);
     for (const word of words) budget.spend(word.value.length + 3);
     const name = basename(words[0]?.value || '');
-    if (name === 'echo') sources.push({ text: words.slice(1).filter(word => !/^-[neE]+$/.test(word.value)).map(word => word.value).join(' ') });
+    if (name === 'echo') sources.push({ text: echoText(words) });
     if (name === 'printf' && words[1]?.value !== '-v') sources.push({ text: printfText(words) });
     if (!DATA_COMMANDS.has(name)) {
       // Foreign transformations can introduce literal bypasses into executable

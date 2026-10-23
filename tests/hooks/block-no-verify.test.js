@@ -284,6 +284,7 @@ const nonLeakingPayloads = [
   ['allows the distinct executable with a literal escaped dot', '"git""\\.exe" commit -n -m x'],
   // A complete echo operand is data; accepted role repair intentionally corrects the authored broad-blocking expectation.
   ['allows quoted echo data (corrected author expectation)', 'echo "git commit -n"'],
+  ['allows two echo lines in a group piped to sh', "{ echo 'git pu'; echo 'sh --no-verify'; } | sh"],
   ['python heredoc string with later bash -n', 'python3 - <<\'PY\'\nold="git add -A\\nif ! git diff --cached --quiet; then\\n  git commit -q -m \\"vault sync"\nPY\nbash -n vault-sync.sh'],
   ['assignment string with later bash -n', 'old="git commit -q -m x"; bash -n x.sh'],
   ['plain commit followed by later-line bash -n', 'git commit -m x\nbash -n s.sh'],
