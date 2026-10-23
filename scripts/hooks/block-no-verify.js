@@ -833,17 +833,19 @@ function groupSources(scope, budget) {
 // $'...' in shell-scan, only word boundaries are decoded, not numeric escapes.
 const PRINTF_SPACE_ESCAPES = { n: '\n', t: '\t', r: '\r', v: '\v', f: '\f', '\\': '\\' };
 
-// echo ends its output with a newline unless an -n option asks it not to, so
-// two echoes in a group write two lines, not one joined command.
+// echo reads options only before its first operand, so `echo 'git commit' -n`
+// prints `git commit -n`. Its output ends with a newline unless an -n option
+// asks it not to, so two echoes in a group write two lines, not one command.
 function echoText(words) {
-  const options = words.slice(1).filter(word => /^-[neE]+$/.test(word.value));
-  const text = words.slice(1).filter(word => !options.includes(word)).map(word => word.value).join(' ');
-  return options.some(word => word.value.includes('n')) ? text : `${text}\n`;
+  let first = 1;
+  while (first < words.length && /^-[neE]+$/.test(words[first].value)) first++;
+  const text = words.slice(first).map(word => word.value).join(' ');
+  return words.slice(1, first).some(word => word.value.includes('n')) ? text : `${text}\n`;
 }
 
 function printfText(words) {
   const format = words[1]?.value || '';
-  if (format === '%s') return words.slice(2).map(word => word.value).join('\n');
+  if (format === '%s') return words.slice(2).map(word => word.value).join('');
   if (format === '%s\\n') return words.slice(2).map(word => `${word.value}\n`).join('');
   const decoded = format.replace(/\\([ntrvf\\])/g, (escape, c) => PRINTF_SPACE_ESCAPES[c]);
   return [decoded, ...words.slice(2).map(word => word.value)].join(' ');

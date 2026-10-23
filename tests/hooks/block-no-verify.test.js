@@ -243,6 +243,8 @@ const executingPayloads = [
   ['pipe echo -n and echo group writes to bash', "{ echo -n 'git commit '; echo '--no-verify -m x'; } | bash"],
   ['pipe printf with a newline escape to sh', "printf 'git push --no-verify\\n' | sh"],
   ['pipe split printf writes ending in a newline escape to sh', '{ printf "git "; printf "push --no-verify\\n"; } | sh'],
+  ['pipe printf %s arguments joined to sh', "printf '%s' 'git pu' 'sh --no-verify' | sh"],
+  ['pipe echo with a trailing -n operand to sh', "echo 'git commit -m x' -n | sh"],
   ['execute data through xargs and bash -c', "printf '%s\\n' 'git commit -n -m x' | xargs -I CMD bash -c CMD"],
   ['execute command substitution text through bash', "echo '$(git commit -n -m x)' | bash"],
   ['execute bash here-string', "bash <<< 'git commit -n -m x'"],
@@ -285,6 +287,7 @@ const nonLeakingPayloads = [
   // A complete echo operand is data; accepted role repair intentionally corrects the authored broad-blocking expectation.
   ['allows quoted echo data (corrected author expectation)', 'echo "git commit -n"'],
   ['allows two echo lines in a group piped to sh', "{ echo 'git pu'; echo 'sh --no-verify'; } | sh"],
+  ['allows an echo -n operand that does not join two group lines', "{ echo 'git pu' -n; echo 'sh --no-verify'; } | sh"],
   ['python heredoc string with later bash -n', 'python3 - <<\'PY\'\nold="git add -A\\nif ! git diff --cached --quiet; then\\n  git commit -q -m \\"vault sync"\nPY\nbash -n vault-sync.sh'],
   ['assignment string with later bash -n', 'old="git commit -q -m x"; bash -n x.sh'],
   ['plain commit followed by later-line bash -n', 'git commit -m x\nbash -n s.sh'],
