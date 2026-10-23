@@ -531,7 +531,9 @@ if (test('drops a line continuation from a double-quoted message, as Bash does',
   assert.deepStrictEqual(res.issues, []);
   // An escaped backslash before a newline is one backslash, and the newline stays
   assert.strictEqual(hook.validateCommitMessage('git commit -m "fix: path C:\\\\\nbody"').message, 'fix: path C:\\\nbody');
-  // Bash removes the backslash only before $ ` " \ and a newline
+  // Bash removes the backslash only before $ ` " \ and a newline; before a CR it stays
+  assert.strictEqual(hook.validateCommitMessage('git commit -m "fix: keep path\\\r\nbody."').message, 'fix: keep path\\\r\nbody.');
+  assert.deepStrictEqual(hook.validateCommitMessage('git commit -m "fix: keep path\\\r\nbody."').issues, []);
   assert.strictEqual(hook.validateCommitMessage('git commit -m "fix: cost \\$5 in \\d+ steps"').message, 'fix: cost $5 in \\d+ steps');
 })) passed++; else failed++;
 
