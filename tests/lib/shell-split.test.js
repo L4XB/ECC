@@ -144,6 +144,9 @@ test('a here-document delimiter is a shell word, read without its quotes', () =>
   // $'...' decodes its escapes: $'E\x4fF' is EOF, and $'it\'s' is it's
   assert.deepStrictEqual(splitShellSegments("cat <<$'E\\x4fF'\nE\\x4fF\nnpm run dev\nEOF\nls"), ["cat <<$'E\\x4fF'", 'ls']);
   assert.deepStrictEqual(splitShellSegments("cat <<$'it\\'s'\nnpm run dev\nit's\nls"), ["cat <<$'it\\'s'", 'ls']);
+  // Hex and octal escapes are bytes, so both of these are the UTF-8 delimiter é
+  assert.deepStrictEqual(splitShellSegments("cat <<$'\\xc3\\xa9'\n\u00c3\u00a9\nnpm run dev\n\u00e9\nls"), ["cat <<$'\\xc3\\xa9'", 'ls']);
+  assert.deepStrictEqual(splitShellSegments("cat <<$'\\303\\251'\nnpm run dev\n\u00e9\nls"), ["cat <<$'\\303\\251'", 'ls']);
   // An empty delimiter ends the body at the first empty line
   assert.deepStrictEqual(splitShellSegments("cat <<''\nnpm run dev\n\nls"), ["cat <<''", 'ls']);
 });

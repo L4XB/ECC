@@ -4,17 +4,31 @@
 const ANSI_C_QUOTED_RE = /\$'((?:\\[\s\S]|[^'\\])*)'/y;
 const ANSI_C_ESCAPES = { a: '\x07', b: '\b', e: '\x1b', E: '\x1b', f: '\f', n: '\n', r: '\r', t: '\t', v: '\v' };
 
-// The text of $'...' quoting with its escapes decoded, as Bash decodes them.
+// A byte escape (\xHH, \NNN), another escape, or a run of text in $'...' quoting
+const ANSI_C_TOKEN_RE = /\\(x[0-9A-Fa-f]{1,2}|[0-7]{1,3})|\\(u[0-9A-Fa-f]{1,4}|U[0-9A-Fa-f]{1,8}|c[\s\S]|[\s\S])|[^\\]+|\\/g;
+
+// The character that an ANSI-C escape other than a byte escape stands for, or the escape itself.
+function ansiCEscape(code, escape) {
+  if ('uU'.includes(code[0]) && code.length > 1) {
+    const value = parseInt(code.slice(1), 16);
+    return value <= 0x10ffff ? String.fromCodePoint(value) : escape;
+  }
+  if (code[0] === 'c' && code.length > 1) return String.fromCharCode(code.charCodeAt(1) & 0x1f);
+  return ANSI_C_ESCAPES[code] ?? (`\\'"?`.includes(code) ? code : escape);
+}
+
+// The text of $'...' quoting with its escapes decoded, as Bash decodes them. Hex and octal
+// escapes are bytes, so $'\xc3\xa9' is the UTF-8 text é.
 function decodeAnsiC(text) {
-  return text.replace(/\\(x[0-9A-Fa-f]{1,2}|u[0-9A-Fa-f]{1,4}|U[0-9A-Fa-f]{1,8}|[0-7]{1,3}|c[\s\S]|[\s\S])/g, (escape, code) => {
-    if ('xuU'.includes(code[0]) && code.length > 1) {
-      const value = parseInt(code.slice(1), 16);
-      return value <= 0x10ffff ? String.fromCodePoint(value) : escape;
+  const bytes = [];
+  for (const [token, byte, code] of text.matchAll(ANSI_C_TOKEN_RE)) {
+    if (byte !== undefined) {
+      bytes.push(byte[0] === 'x' ? parseInt(byte.slice(1), 16) : parseInt(byte, 8) & 0xff);
+    } else {
+      bytes.push(...Buffer.from(code === undefined ? token : ansiCEscape(code, token), 'utf8'));
     }
-    if (/^[0-7]/.test(code)) return String.fromCharCode(parseInt(code, 8) & 0xff);
-    if (code[0] === 'c' && code.length > 1) return String.fromCharCode(code.charCodeAt(1) & 0x1f);
-    return ANSI_C_ESCAPES[code] ?? (`\\'"?`.includes(code) ? code : escape);
-  });
+  }
+  return Buffer.from(bytes).toString('utf8');
 }
 
 // The shell word at `start`, up to an unquoted blank or operator character, with its quoting
