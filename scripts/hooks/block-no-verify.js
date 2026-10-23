@@ -815,18 +815,25 @@ function commandRole(words, budget) {
   return { kind: 'opaque', stdin: true };
 }
 
+// A brace group or subshell writes what its own commands print into the pipe:
+// `{ echo 'git push --no-verify'; } | sh` feeds sh like `echo ... | sh`. The
+// writes form one stream, so they are also read joined in order:
+// `{ printf 'git pu'; printf 'sh --no-verify'; } | sh`.
+function groupSources(scope, budget) {
+  const written = [];
+  for (const inner of scanShell(scope.body, budget).commands) {
+    if (!inner.pipeTo) written.push(...pipelineSources(inner, budget));
+  }
+  if (written.length > 1) written.push({ text: written.map(source => source.text).join(''), opaque: written.some(source => source.opaque) });
+  return written;
+}
+
 // Literal producers only. Unmodeled transformations remain conservative rather
 // than executing a formatter, interpreter, shell or user-supplied command.
 function pipelineSources(command, budget) {
   const sources = [];
   for (let current = command; current; current = current.pipeFrom) {
-    // A brace group or subshell writes what its own commands print into the
-    // pipe: `{ echo 'git push --no-verify'; } | sh` feeds sh like `echo ... | sh`.
-    if (current.closedScope) {
-      for (const inner of scanShell(current.closedScope.body, budget).commands) {
-        if (!inner.pipeTo) sources.push(...pipelineSources(inner, budget));
-      }
-    }
+    if (current.closedScope) sources.push(...groupSources(current.closedScope, budget));
     budget.spend(current.words.length + 1);
     const { words } = executableWords(current.words, budget);
     for (const word of words) budget.spend(word.value.length + 3);

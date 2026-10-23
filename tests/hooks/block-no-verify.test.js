@@ -239,6 +239,8 @@ const executingPayloads = [
   ['pipe subshell data to bash', "(echo 'git push --no-verify'; printf x) | bash"],
   ['pipe nested group data to sh', "{ (printf '%s\\n' 'git commit -n -m x'); } | sh"],
   ['pipe group pipeline data to sh', "{ echo 'git push --no-verify' | grep git; } | sh"],
+  ['pipe consecutive group writes to sh', "{ printf 'git pu'; printf 'sh --no-verify'; } | sh"],
+  ['pipe echo -n and echo group writes to bash', "{ echo -n 'git commit '; echo '--no-verify -m x'; } | bash"],
   ['execute data through xargs and bash -c', "printf '%s\\n' 'git commit -n -m x' | xargs -I CMD bash -c CMD"],
   ['execute command substitution text through bash', "echo '$(git commit -n -m x)' | bash"],
   ['execute bash here-string', "bash <<< 'git commit -n -m x'"],
