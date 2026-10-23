@@ -175,16 +175,23 @@ function validateCommitMessage(command) {
   // Extract commit message from command (quote-aware: when quoted, capture to the
   // matching closing quote, consuming escaped chars (\") so an embedded escaped
   // quote does not truncate the subject, and allowing the OTHER quote char inside
-  // the body; when unquoted, capture the full remaining tail, not just the first token)
-  const messageMatch = command.match(/(?:-m|--message)[=\s]+(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^"']+?)\s*$)/);
+  // the body; when unquoted, capture the full remaining tail, not just the first token).
+  // A message written as -m "$(cat <<'EOF' ... EOF)", as Claude Code writes them, is
+  // the body of that here-document.
+  const messageMatch = command.match(/(?:-m|--message)[=\s]+(?:"\$\(\s*cat\s+<<(?<stripTabs>-?)\s*(?<quote>['"]?)(?<delimiter>[A-Za-z_][\w.-]*)\k<quote>[ \t]*\r?\n(?<heredoc>[\s\S]*?)\r?\n[ \t]*\k<delimiter>[ \t]*\r?(?:\n|$)|"(?<double>(?:\\.|[^"\\])*)"|'(?<single>(?:\\.|[^'\\])*)'|(?<bare>[^"']+?)\s*$)/);
   if (!messageMatch) return null;
   
-  const message = messageMatch[1] ?? messageMatch[2] ?? messageMatch[3];
+  const { stripTabs, heredoc, double, single, bare } = messageMatch.groups;
+  // <<- strips the leading tabs of each line of the here-document
+  const message = stripTabs ? heredoc.replace(/^\t+/gm, '') : heredoc ?? double ?? single ?? bare;
+  // The format rules apply to the subject: git drops leading blank lines and trailing
+  // whitespace, and the first line left is the subject.
+  const subject = (message.split('\n').find(line => line.trim()) || '').trimEnd();
   const issues = [];
   
   // Check conventional commit format
   const conventionalCommit = /^(feat|fix|docs|style|refactor|test|chore|build|ci|perf|revert)(\(.+\))?:\s*.+/;
-  if (!conventionalCommit.test(message)) {
+  if (!conventionalCommit.test(subject)) {
     issues.push({
       type: 'format',
       message: 'Commit message does not follow conventional commit format',
@@ -193,17 +200,17 @@ function validateCommitMessage(command) {
   }
   
   // Check message length
-  if (message.length > 72) {
+  if (subject.length > 72) {
     issues.push({
       type: 'length',
-      message: `Commit message too long (${message.length} chars, max 72)`,
+      message: `Commit message too long (${subject.length} chars, max 72)`,
       suggestion: 'Keep the first line under 72 characters'
     });
   }
   
   // Check for lowercase first letter (conventional)
-  if (conventionalCommit.test(message)) {
-    const afterColon = message.split(':')[1];
+  if (conventionalCommit.test(subject)) {
+    const afterColon = subject.split(':')[1];
     if (afterColon && /^[A-Z]/.test(afterColon.trim())) {
       issues.push({
         type: 'capitalization',
@@ -214,7 +221,7 @@ function validateCommitMessage(command) {
   }
   
   // Check for trailing period
-  if (message.endsWith('.')) {
+  if (subject.endsWith('.')) {
     issues.push({
       type: 'punctuation',
       message: 'Commit message should not end with a period',
