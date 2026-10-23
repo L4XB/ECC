@@ -11,6 +11,26 @@ function heredocAt(command, index) {
   return match && { text: match[0], delimiter: match[2] ?? match[3] ?? match[4], stripTabs: match[1] === '-' };
 }
 
+// The index after the `))` that closes the arithmetic `((` at `index`, or -1.
+function endOfArithmetic(command, index) {
+  let depth = 0;
+  for (let i = index; i < command.length; i++) {
+    if (command[i] === '(') depth++;
+    else if (command[i] === ')' && --depth === 0) return command[i - 1] === ')' ? i + 1 : -1;
+  }
+  return -1;
+}
+
+// The end of a span copied as is, or -1: a comment, which runs to the end of its line, or an
+// arithmetic expression such as $((x << n)), whose `<<` is a shift and `&&` an operator.
+function literalSpanEnd(command, index, atWordStart) {
+  if (command[index] === '#' && atWordStart) {
+    const newline = command.indexOf('\n', index);
+    return newline === -1 ? command.length : newline;
+  }
+  return command[index] === '(' && command[index + 1] === '(' ? endOfArithmetic(command, index) : -1;
+}
+
 // The end of the here-document bodies that start at `start`, one after the other.
 function endOfHeredocBodies(command, start, heredocs) {
   let end = start;
@@ -18,7 +38,8 @@ function endOfHeredocBodies(command, start, heredocs) {
     while (end < command.length) {
       const newline = command.indexOf('\n', end);
       const lineEnd = newline === -1 ? command.length : newline;
-      const line = command.slice(end, lineEnd);
+      // A CRLF line ends in \r, which is not part of the delimiter.
+      const line = command.slice(end, lineEnd).replace(/\r$/, '');
       end = lineEnd + 1;
       if ((stripTabs ? line.replace(/^\t+/, '') : line) === delimiter) break;
     }
@@ -70,6 +91,13 @@ function splitShellSegments(command) {
 
     const next = command[i + 1] || '';
     const prev = i > 0 ? command[i - 1] : '';
+
+    const spanEnd = literalSpanEnd(command, i, current === '' || /[\s;&|(]/.test(prev));
+    if (spanEnd !== -1) {
+      current += command.slice(i, spanEnd);
+      i = spanEnd - 1;
+      continue;
+    }
 
     const heredoc = ch === '<' && next === '<' ? heredocAt(command, i) : null;
     if (heredoc) {

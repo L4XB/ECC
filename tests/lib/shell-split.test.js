@@ -134,6 +134,19 @@ test('a here-document body stays with its command', () => {
 test('a here-string or a shift is not a here-document', () => {
   assert.deepStrictEqual(splitShellSegments('cat <<< x && y'), ['cat <<< x', 'y']);
   assert.deepStrictEqual(splitShellSegments('echo $((x << 2))\nnext'), ['echo $((x << 2))', 'next']);
+  assert.deepStrictEqual(splitShellSegments('echo $((x << n))\nnpm run dev'), ['echo $((x << n))', 'npm run dev']);
+  assert.deepStrictEqual(splitShellSegments('(( n << 2 )) && npm run dev'), ['(( n << 2 ))', 'npm run dev']);
+});
+test('a << in a comment is not a here-document, and a comment is not split', () => {
+  assert.deepStrictEqual(splitShellSegments('echo ok # <<EOF\nnpm run dev'), ['echo ok # <<EOF', 'npm run dev']);
+  assert.deepStrictEqual(splitShellSegments('echo hi # a && b'), ['echo hi # a && b']);
+  assert.deepStrictEqual(splitShellSegments('echo a#b ${#x} && c'), ['echo a#b ${#x}', 'c']);
+});
+test('a here-document delimiter on a CRLF line still ends the body', () => {
+  assert.deepStrictEqual(
+    splitShellSegments('cat <<EOF\r\ntext\r\nEOF\r\nnpm run dev'),
+    ['cat <<EOF\r\ntext\r\nEOF', 'npm run dev']
+  );
 });
 
 console.log(`\n=== Results: ${passed} passed, ${failed} failed ===`);
