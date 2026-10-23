@@ -18,6 +18,7 @@ REFERENCE_DEFINITION_RE = re.compile(
 REFERENCE_USAGE_RE = re.compile(
     r"(?<![\\])(?:\\\\)*\[(?P<text>[^\]\n]+)\](?:\[(?P<label>[^\]\n]*)\])?"
 )
+BLANK_LINE_RE = re.compile(r"\n[ \t]*\r?\n")
 LINK_TITLE_RE = re.compile(
     r'\s+(?:"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|\([^()]*\))\s*$'
 )
@@ -68,16 +69,36 @@ def _is_escaped(text: str, index: int) -> bool:
     return backslashes % 2 == 1
 
 
+def _html_comment_end(text: str, start: int, closing: int, blank: int) -> int:
+    """Where the comment that opens at `start` and closes at `closing` ends, or -1 if it is text.
+
+    One that starts a line, after at most three spaces, opens an HTML block. The block may span
+    blank lines and takes the rest of the line that holds its closer. One inside a line is inline
+    HTML, which cannot outlast its paragraph, so when the first blank line after it, at `blank`,
+    comes before its closer, it is text.
+    """
+    indent = 0
+    while indent < 4 and start - indent > 0 and text[start - indent - 1] == " ":
+        indent += 1
+    if indent < 4 and (start - indent == 0 or text[start - indent - 1] == "\n"):
+        newline = text.find("\n", closing + 3)
+        return len(text) if newline == -1 else newline
+    return -1 if blank < closing else closing + 3
+
+
 def without_inline_code_and_html_comments(text: str) -> str:
     """Blank out inline code spans and HTML comments, whichever opens first.
 
-    A comment runs from `<!--` to the first `-->` after it (`<!-->` and `<!--->` included). It
-    becomes an opaque run of NUL characters, so a link or a reference definition cannot continue
-    through it, as none can through raw HTML. An escaped `\\<!--`, or an opener with no closer,
-    stays literal text, as in CommonMark.
+    A comment runs from `<!--` to the first `-->` after it (`<!-->` and `<!--->` included), within
+    the limits that `_html_comment_end` sets. It becomes an opaque run of NUL characters, so a
+    link or a reference definition cannot continue through it, as none can through raw HTML. An
+    escaped `\\<!--`, or an opener with no closer, stays literal text, as in CommonMark.
     """
     output: list[str] = []
     cursor = 0
+    # -- the first closer after an opener and the first blank line after it, kept while valid --
+    closing = -1
+    blank = -1
     comments_can_close = True
     while cursor < len(text):
         if (
@@ -85,16 +106,23 @@ def without_inline_code_and_html_comments(text: str) -> str:
             and text.startswith("<!--", cursor)
             and not _is_escaped(text, cursor)
         ):
-            closing = text.find("-->", cursor + 2)
-            if closing != -1:
+            if closing < cursor + 2:
+                closing = text.find("-->", cursor + 2)
+            if blank < cursor:
+                match = BLANK_LINE_RE.search(text, cursor)
+                blank = match.start() if match else len(text)
+            end = (
+                -1 if closing == -1 else _html_comment_end(text, cursor, closing, blank)
+            )
+            if end != -1:
                 output.extend(
                     "\n" if character == "\n" else "\0"
-                    for character in text[cursor : closing + 3]
+                    for character in text[cursor:end]
                 )
-                cursor = closing + 3
+                cursor = end
                 continue
             # -- no closer here means none for any later opener either --
-            comments_can_close = False
+            comments_can_close = closing != -1
         if text[cursor] != "`":
             output.append(text[cursor])
             cursor += 1
