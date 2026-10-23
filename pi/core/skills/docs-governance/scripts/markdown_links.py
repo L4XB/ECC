@@ -19,6 +19,8 @@ REFERENCE_USAGE_RE = re.compile(
     r"(?<![\\])(?:\\\\)*\[(?P<text>[^\]\n]+)\](?:\[(?P<label>[^\]\n]*)\])?"
 )
 BLANK_LINE_RE = re.compile(r"\n[ \t]*\r?\n")
+# -- what may come before a block on its line: indentation and block quote or list markers --
+CONTAINER_PREFIX_RE = re.compile(r"(?:[ \t]*(?:>|[-+*][ \t]|\d{1,9}[.)][ \t]))*[ \t]*")
 LINK_TITLE_RE = re.compile(
     r'\s+(?:"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|\([^()]*\))\s*$'
 )
@@ -72,15 +74,18 @@ def _is_escaped(text: str, index: int) -> bool:
 def _html_comment_end(text: str, start: int, closing: int, blank: int) -> int:
     """Where the comment that opens at `start` and closes at `closing` ends, or -1 if it is text.
 
-    One that starts a line, after at most three spaces, opens an HTML block. The block may span
-    blank lines and takes the rest of the line that holds its closer. One inside a line is inline
-    HTML, which cannot outlast its paragraph, so when the first blank line after it, at `blank`,
-    comes before its closer, it is text.
+    One that starts a block, after nothing but indentation and block quote or list markers on
+    its line (as in `- <!--`), opens an HTML block. The block may span blank lines and takes the
+    rest of the line that holds its closer. One after text on its line is inline HTML, which
+    cannot outlast its paragraph, so when the first blank line after it, at `blank`, comes before
+    its closer, it is text.
     """
-    indent = 0
-    while indent < 4 and start - indent > 0 and text[start - indent - 1] == " ":
-        indent += 1
-    if indent < 4 and (start - indent == 0 or text[start - indent - 1] == "\n"):
+    # -- only the 64 characters before the opener are read, so a long line stays cheap --
+    window = max(0, start - 64)
+    line_start = text.rfind("\n", window, start) + 1
+    if (line_start or not window) and CONTAINER_PREFIX_RE.fullmatch(
+        text, line_start, start
+    ):
         newline = text.find("\n", closing + 3)
         return len(text) if newline == -1 else newline
     return -1 if blank < closing else closing + 3

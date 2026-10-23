@@ -292,6 +292,11 @@ def test_artifact_scope_reads_html_comments_as_commonmark_does(project: Path) ->
         # -- the line that holds its closer --
         "<!--\n[hidden](missing-hidden.md)\n\n[hidden2](missing-hidden2.md)\n-->\n\n"
         "<!-- c --> [rest](missing-rest.md)\n\n"
+        # -- so does one that starts a list item or a block quote line --
+        "- <!--\n\n  [listed](missing-listed.md)\n  -->\n\n"
+        "> <!-- c --> [quoted](missing-quoted.md)\n\n"
+        # -- after text in a list item, a comment is inline again --
+        "- item <!-- c\n\n  [item-real](missing-item-real.md)\n  -->\n\n"
         # -- a comment where a destination must begin does not make a definition --
         "[foo]: <!-- note --> missing-definition.md\n\n[foo]\n\n"
         "[bar]: <!-- only a comment -->\n\n[bar]\n\n"
@@ -310,10 +315,13 @@ def test_artifact_scope_reads_html_comments_as_commonmark_does(project: Path) ->
     assert "Broken Markdown link: 'guide.md' -> 'missing-real.md'" in result.stdout
     assert "missing-hidden" not in result.stdout
     assert "missing-rest.md" not in result.stdout
+    assert "missing-listed.md" not in result.stdout
+    assert "missing-quoted.md" not in result.stdout
+    assert "Broken Markdown link: 'guide.md' -> 'missing-item-real.md'" in result.stdout
     assert "missing-definition.md" not in result.stdout
     assert "Broken Markdown link: 'guide.md' -> 'missing-titled.md'" in result.stdout
     assert "missing-fenced.md" not in result.stdout
-    assert result.stdout.count("Broken Markdown link") == 4, result.stdout
+    assert result.stdout.count("Broken Markdown link") == 5, result.stdout
 
 
 def test_artifact_scope_ignores_title_with_escaped_quotes(project: Path) -> None:
