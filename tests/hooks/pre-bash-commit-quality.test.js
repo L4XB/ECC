@@ -525,6 +525,14 @@ if (test('still reports a bad subject inside a here-document', () => {
   assert.deepStrictEqual(res.issues.map(i => i.type), ['format', 'punctuation']);
 })) passed++; else failed++;
 
+if (test('drops a line continuation from a double-quoted message, as Bash does', () => {
+  const res = hook.validateCommitMessage('git commit -m "\\\nfix: handle empty input"');
+  assert.strictEqual(res.message, 'fix: handle empty input');
+  assert.deepStrictEqual(res.issues, []);
+  // An escaped backslash before a newline is a backslash, and the newline stays
+  assert.strictEqual(hook.validateCommitMessage('git commit -m "fix: path C:\\\\\nbody"').message, 'fix: path C:\\\\\nbody');
+})) passed++; else failed++;
+
 if (test('reads a here-document whose body has a backslash at the end of a line', () => {
   const res = hook.validateCommitMessage('git commit -m "$(cat <<\'EOF\'\nUpdate stuff.\n\nC:\\build\\\nEOF\n)"');
   assert.ok(res, 'expected a validation result');
