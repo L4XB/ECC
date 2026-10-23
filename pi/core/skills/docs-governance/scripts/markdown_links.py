@@ -74,11 +74,19 @@ def _is_escaped(text: str, index: int) -> bool:
 
 
 def _continues_a_paragraph(text: str, line_start: int) -> bool:
-    """Whether the line at `line_start` follows a paragraph line, not a blank or list line."""
+    """Whether the line at `line_start` follows a paragraph line.
+
+    A blank line, a list or block quote line, and an indented line, which may continue a list
+    item, are not taken for one.
+    """
     if line_start == 0:
         return False
     previous = text[text.rfind("\n", 0, line_start - 1) + 1 : line_start - 1]
-    return bool(previous.strip()) and not CONTAINER_MARKER_RE.match(previous)
+    return (
+        bool(previous.strip())
+        and not previous[0].isspace()
+        and not CONTAINER_MARKER_RE.match(previous)
+    )
 
 
 def _html_comment_end(text: str, start: int, closing: int, blank: int) -> int:

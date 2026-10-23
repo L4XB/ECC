@@ -298,6 +298,7 @@ def test_artifact_scope_reads_html_comments_as_commonmark_does(project: Path) ->
         # -- a list that starts at 2 cannot interrupt a paragraph; one that starts at 1 can --
         "Paragraph\n2. <!-- c --> [numbered](missing-numbered.md)\n\n"
         "1. first\n2. <!-- c --> [listed2](missing-listed2.md)\n\n"
+        "1. first\n   continued\n2. <!-- c --> [listed3](missing-listed3.md)\n\n"
         "Paragraph\n1. <!-- c --> [one](missing-one.md)\n\n"
         # -- after text in a list item, a comment is inline again --
         "- item <!-- c\n\n  [item-real](missing-item-real.md)\n  -->\n\n"
@@ -324,6 +325,7 @@ def test_artifact_scope_reads_html_comments_as_commonmark_does(project: Path) ->
     assert "Broken Markdown link: 'guide.md' -> 'missing-item-real.md'" in result.stdout
     assert "Broken Markdown link: 'guide.md' -> 'missing-numbered.md'" in result.stdout
     assert "missing-listed2.md" not in result.stdout
+    assert "missing-listed3.md" not in result.stdout
     assert "missing-one.md" not in result.stdout
     assert "missing-definition.md" not in result.stdout
     assert "Broken Markdown link: 'guide.md' -> 'missing-titled.md'" in result.stdout
