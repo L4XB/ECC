@@ -28,7 +28,14 @@ def without_fenced_code(text: str) -> str:
     output: list[str] = []
     fence_character: str | None = None
     fence_length = 0
+    # -- inside an HTML comment block that opened on an earlier line, a fence line is comment
+    # -- text, which the inline pass blanks with the rest of the comment --
+    in_comment = False
     for line in text.splitlines(keepends=True):
+        if in_comment:
+            in_comment = "-->" not in line
+            output.append(line)
+            continue
         marker = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line)
         if fence_character is None and marker:
             fence_character = marker.group(1)[0]
@@ -45,6 +52,8 @@ def without_fenced_code(text: str) -> str:
                 fence_length = 0
             output.append("\n" if line.endswith("\n") else "")
             continue
+        opener = re.match(r"^ {0,3}<!--", line)
+        in_comment = bool(opener) and "-->" not in line[opener.end() - 2 :]
         output.append(line)
     return "".join(output)
 
@@ -200,7 +209,9 @@ def reference_link_targets(text: str) -> list[str]:
 
 def markdown_link_targets(text: str) -> list[str]:
     text = without_inline_code_and_html_comments(without_fenced_code(text))
-    return inline_link_targets(text) + reference_link_targets(text)
+    targets = inline_link_targets(text) + reference_link_targets(text)
+    # -- a destination made of a blanked comment is no link --
+    return [target for target in targets if "\0" not in target]
 
 
 def normalize_link_target(raw: str) -> str | None:

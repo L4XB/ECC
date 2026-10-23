@@ -287,7 +287,10 @@ def test_artifact_scope_reads_html_comments_as_commonmark_does(project: Path) ->
         # -- a comment that opens before a code span ends at its own closer --
         "<!-- ` --> `sample` [after-code](missing-after-code.md)\n\n"
         # -- a comment where a destination must begin does not make a definition --
-        "[foo]: <!-- note --> missing-definition.md\n\n[foo]\n",
+        "[foo]: <!-- note --> missing-definition.md\n\n[foo]\n\n"
+        "[bar]: <!-- only a comment -->\n\n[bar]\n\n"
+        # -- a fence line inside a comment block is comment text; the fence after it is real --
+        "<!--\n```\n-->\n```\n[fenced](missing-fenced.md)\n```\n",
         encoding="utf-8",
     )
     result = run_audit(project, "artifacts")
@@ -295,6 +298,8 @@ def test_artifact_scope_reads_html_comments_as_commonmark_does(project: Path) ->
     assert "Broken Markdown link: 'guide.md' -> 'missing-escaped.md'" in result.stdout
     assert "Broken Markdown link: 'guide.md' -> 'missing-after-code.md'" in result.stdout
     assert "missing-definition.md" not in result.stdout
+    assert "missing-fenced.md" not in result.stdout
+    assert result.stdout.count("Broken Markdown link") == 2, result.stdout
 
 
 def test_artifact_scope_ignores_title_with_escaped_quotes(project: Path) -> None:
