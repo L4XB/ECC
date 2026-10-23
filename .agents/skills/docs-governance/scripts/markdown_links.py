@@ -18,6 +18,9 @@ REFERENCE_DEFINITION_RE = re.compile(
 REFERENCE_USAGE_RE = re.compile(
     r"(?<![\\])(?:\\\\)*\[(?P<text>[^\]\n]+)\](?:\[(?P<label>[^\]\n]*)\])?"
 )
+LINK_TITLE_RE = re.compile(
+    r'\s+(?:"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|\([^()]*\))\s*$'
+)
 EXTERNAL_URI_RE = re.compile(
     r"^(?:[A-Za-z][A-Za-z0-9+.-]*://|(?:data|doi|geo|irc|magnet|mailto|news|sms|tel|urn):)",
     re.IGNORECASE,
@@ -77,7 +80,11 @@ def without_inline_code_and_html_comments(text: str) -> str:
     cursor = 0
     comments_can_close = True
     while cursor < len(text):
-        if comments_can_close and text.startswith("<!--", cursor) and not _is_escaped(text, cursor):
+        if (
+            comments_can_close
+            and text.startswith("<!--", cursor)
+            and not _is_escaped(text, cursor)
+        ):
             closing = text.find("-->", cursor + 2)
             if closing != -1:
                 output.extend(
@@ -210,8 +217,14 @@ def reference_link_targets(text: str) -> list[str]:
 def markdown_link_targets(text: str) -> list[str]:
     text = without_inline_code_and_html_comments(without_fenced_code(text))
     targets = inline_link_targets(text) + reference_link_targets(text)
-    # -- a destination made of a blanked comment is no link --
-    return [target for target in targets if "\0" not in target]
+    # -- a destination made of a blanked comment is no link; a title may hold one --
+    return [target for target in targets if "\0" not in _without_title(target)]
+
+
+def _without_title(raw: str) -> str:
+    target = raw.strip()
+    title = None if target.startswith("<") else LINK_TITLE_RE.search(target)
+    return target[: title.start()] if title else target
 
 
 def normalize_link_target(raw: str) -> str | None:
@@ -223,12 +236,7 @@ def normalize_link_target(raw: str) -> str | None:
             return None
         target = target[1:closing]
     else:
-        title = re.search(
-            r'\s+(?:"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|\([^()]*\))\s*$',
-            target,
-        )
-        if title:
-            target = target[: title.start()]
+        target = _without_title(target)
     # Unescape supported Markdown punctuation before Windows path separators.
     target = re.sub(r"\\([()\[\]'])", r"\1", target)
     target = unquote(target.split("#", 1)[0].split("?", 1)[0]).replace("\\", "/")
