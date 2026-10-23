@@ -820,6 +820,13 @@ function commandRole(words, budget) {
 function pipelineSources(command, budget) {
   const sources = [];
   for (let current = command; current; current = current.pipeFrom) {
+    // A brace group or subshell writes what its own commands print into the
+    // pipe: `{ echo 'git push --no-verify'; } | sh` feeds sh like `echo ... | sh`.
+    if (current.closedScope) {
+      for (const inner of scanShell(current.closedScope.body, budget).commands) {
+        if (!inner.pipeTo) sources.push(...pipelineSources(inner, budget));
+      }
+    }
     budget.spend(current.words.length + 1);
     const { words } = executableWords(current.words, budget);
     for (const word of words) budget.spend(word.value.length + 3);
