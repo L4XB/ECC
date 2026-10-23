@@ -143,6 +143,16 @@ test('a here-document delimiter is a shell word, read without its quotes', () =>
   // An empty delimiter ends the body at the first empty line
   assert.deepStrictEqual(splitShellSegments("cat <<''\nnpm run dev\n\nls"), ["cat <<''", 'ls']);
 });
+test('an expanded here-document body exposes the commands its substitutions run', () => {
+  // Quotes are plain text in the body, so Bash still runs the substitution
+  assert.deepStrictEqual(splitShellSegments("npm --version <<EOF\n'$(npm run dev)'\nEOF"), ['npm --version <<EOF', 'npm run dev']);
+  assert.deepStrictEqual(splitShellSegments('cat <<EOF\n`npm run dev`\nEOF'), ['cat <<EOF', 'npm run dev']);
+  assert.deepStrictEqual(splitShellSegments('cat <<EOF\nStarted: ${x:-$(npm run dev)}\nEOF'), ['cat <<EOF', 'npm run dev']);
+  // An escaped substitution, or a body whose delimiter is quoted, is not expanded
+  assert.deepStrictEqual(splitShellSegments('cat <<EOF\n\\$(npm run dev)\nEOF'), ['cat <<EOF']);
+  assert.deepStrictEqual(splitShellSegments("cat <<'EOF'\n$(npm run dev)\nEOF"), ["cat <<'EOF'"]);
+  assert.deepStrictEqual(splitShellSegments('cat <<\\EOF\n$(npm run dev)\nEOF'), ['cat <<\\EOF']);
+});
 test('a here-document body after an operator is left out too', () => {
   assert.deepStrictEqual(splitShellSegments('cat <<EOF &&\nnpm run dev\nEOF\necho done'), ['cat <<EOF', 'echo done']);
   assert.deepStrictEqual(splitShellSegments('npm --version <<EOF && cat\nnpm run dev\nEOF'), ['npm --version <<EOF', 'cat']);

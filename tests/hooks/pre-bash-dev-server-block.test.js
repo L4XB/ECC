@@ -222,6 +222,13 @@ function runTests() {
       const result = runScript('cd app\nnpm run dev');
       assert.strictEqual(result.code, 2, `Expected exit code 2, got ${result.code}`);
     }) ? passed++ : failed++);
+
+    (test('blocks a dev server started by a substitution in a here-document body', () => {
+      for (const command of ["npm --version <<EOF\n'$(npm run dev)'\nEOF", "cat <<EOF\n'$(npm run dev)'\nEOF"]) {
+        const result = runScript(command);
+        assert.strictEqual(result.code, 2, `Expected exit code 2 for ${JSON.stringify(command)}, got ${result.code}`);
+      }
+    }) ? passed++ : failed++);
   }
 
   (test('allows a here-document that only mentions a dev server', () => {

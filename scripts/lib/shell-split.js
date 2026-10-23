@@ -2,7 +2,8 @@
 
 // A here-document opener at `index`, but not a here-string (<<<): `<<` or `<<-`, then the
 // delimiter, a shell word whose quotes are removed (`<<'EOF'`, `<<E"OF"`, `<<EOF/END`, `<<123`,
-// and `<<''`, whose body ends at the first empty line).
+// and `<<''`, whose body ends at the first empty line). Unless part of the word is quoted, Bash
+// expands the body, so its command substitutions run.
 function heredocAt(command, index) {
   if (command[index - 1] === '<' || command[index + 2] === '<') return null;
   let i = index + 2;
@@ -22,23 +23,58 @@ function heredocAt(command, index) {
       quoted = true;
     } else if (ch === '\\' && i + 1 < command.length) {
       delimiter += command[++i];
+      quoted = true;
     } else if (/[\s|&;()<>]/.test(ch)) {
       break;
     } else {
       delimiter += ch;
     }
   }
-  return (delimiter || quoted) && !quote ? { text: command.slice(index, i), delimiter, stripTabs } : null;
+  if ((!delimiter && !quoted) || quote) return null;
+  return { text: command.slice(index, i), delimiter, stripTabs, expands: !quoted };
+}
+
+// The index after the `)` that closes the `(` at `index`, or -1. Quoted parentheses and escaped
+// characters do not count.
+function endOfParens(command, index) {
+  let depth = 0;
+  let quote = null;
+  for (let i = index; i < command.length; i++) {
+    const ch = command[i];
+    if (ch === '\\' && quote !== "'") i++;
+    else if (quote) quote = ch === quote ? null : quote;
+    else if (ch === "'" || ch === '"') quote = ch;
+    else if (ch === '(') depth++;
+    else if (ch === ')' && --depth === 0) return i + 1;
+  }
+  return -1;
 }
 
 // The index after the `))` that closes the arithmetic `((` at `index`, or -1.
 function endOfArithmetic(command, index) {
-  let depth = 0;
-  for (let i = index; i < command.length; i++) {
-    if (command[i] === '(') depth++;
-    else if (command[i] === ')' && --depth === 0) return command[i - 1] === ')' ? i + 1 : -1;
+  const end = endOfParens(command, index);
+  return end !== -1 && command[end - 2] === ')' ? end : -1;
+}
+
+// The commands of the `$(...)` and backquoted substitutions in an expanded here-document body.
+// Bash runs them while it reads the body, where quotes are plain text and a backslash escapes.
+function commandSubstitutions(body) {
+  const commands = [];
+  let i = 0;
+  while (i < body.length) {
+    const backquoted = body[i] === '`';
+    if (body[i] === '\\') {
+      i += 2;
+    } else if (backquoted || (body[i] === '$' && body[i + 1] === '(')) {
+      const end = backquoted ? body.indexOf('`', i + 1) + 1 : endOfParens(body, i + 1);
+      if (end <= 0) break;
+      commands.push(body.slice(backquoted ? i + 1 : i + 2, end - 1));
+      i = end;
+    } else {
+      i++;
+    }
   }
-  return -1;
+  return commands;
 }
 
 // The end of a span copied as is, or -1: a comment, which runs to the end of its line, or an
@@ -51,28 +87,39 @@ function literalSpanEnd(command, index, atWordStart) {
   return command[index] === '(' && command[index + 1] === '(' ? endOfArithmetic(command, index) : -1;
 }
 
-// The end of the here-document bodies that start at `start`, one after the other.
-function endOfHeredocBodies(command, start, heredocs) {
+// The here-document bodies that start at `start`, one after the other: the index after them,
+// and the commands that the expanded ones run through command substitution.
+function readHeredocBodies(command, start, heredocs) {
   let end = start;
-  for (const { delimiter, stripTabs } of heredocs) {
+  const substitutions = [];
+  for (const { delimiter, stripTabs, expands } of heredocs) {
+    const bodyStart = end;
+    let bodyEnd = command.length;
     while (end < command.length) {
       const newline = command.indexOf('\n', end);
       const lineEnd = newline === -1 ? command.length : newline;
       // A CRLF line ends in \r, which is not part of the delimiter.
       const line = command.slice(end, lineEnd).replace(/\r$/, '');
+      const lineStart = end;
       end = lineEnd + 1;
-      if ((stripTabs ? line.replace(/^\t+/, '') : line) === delimiter) break;
+      if ((stripTabs ? line.replace(/^\t+/, '') : line) === delimiter) {
+        bodyEnd = lineStart;
+        break;
+      }
     }
+    if (expands) substitutions.push(...commandSubstitutions(command.slice(bodyStart, bodyEnd)));
   }
-  return Math.min(end, command.length);
+  return { end: Math.min(end, command.length), substitutions };
 }
 
 // At the newline at `index` the command ends. The bodies of the here-documents opened on its
-// line follow it. They are data, not commands, so they are left out of the segments. Returns the
-// index after the bodies.
+// line follow it. They are data, not commands, so they are left out of the segments, except for
+// the commands that an expanded body runs. Returns the index after the bodies.
 function endLine(command, index, current, heredocs, segments) {
   if (current.trim()) segments.push(current.trim());
-  return endOfHeredocBodies(command, index + 1, heredocs);
+  const { end, substitutions } = readHeredocBodies(command, index + 1, heredocs);
+  for (const substitution of substitutions) segments.push(...splitShellSegments(substitution));
+  return end;
 }
 
 /**
