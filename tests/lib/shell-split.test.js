@@ -147,6 +147,11 @@ test('a here-document delimiter is a shell word, read without its quotes', () =>
   // Hex and octal escapes are bytes, so both of these are the UTF-8 delimiter é
   assert.deepStrictEqual(splitShellSegments("cat <<$'\\xc3\\xa9'\n\u00c3\u00a9\nnpm run dev\n\u00e9\nls"), ["cat <<$'\\xc3\\xa9'", 'ls']);
   assert.deepStrictEqual(splitShellSegments("cat <<$'\\303\\251'\nnpm run dev\n\u00e9\nls"), ["cat <<$'\\303\\251'", 'ls']);
+  // A delimiter whose bytes are not UTF-8 matches no line, so the body runs to the end
+  assert.deepStrictEqual(splitShellSegments("cat <<$'\\xff'\n\ufffd\nnpm run dev"), ["cat <<$'\\xff'"]);
+  // A long delimiter is read in one pass
+  const long = 'a'.repeat(200000);
+  assert.deepStrictEqual(splitShellSegments(`cat <<$'${long}'\ntext\n${long}\nnpm run dev`), [`cat <<$'${long}'`, 'npm run dev']);
   // An empty delimiter ends the body at the first empty line
   assert.deepStrictEqual(splitShellSegments("cat <<''\nnpm run dev\n\nls"), ["cat <<''", 'ls']);
 });

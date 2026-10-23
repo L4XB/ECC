@@ -17,26 +17,34 @@ function ansiCEscape(code, escape) {
   return ANSI_C_ESCAPES[code] ?? (`\\'"?`.includes(code) ? code : escape);
 }
 
-// The text of $'...' quoting with its escapes decoded, as Bash decodes them. Hex and octal
-// escapes are bytes, so $'\xc3\xa9' is the UTF-8 text é.
+const UTF8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+
+// The text of $'...' quoting with its escapes decoded, as Bash decodes them, or null when the
+// bytes are not UTF-8. Hex and octal escapes are bytes, so $'\xc3\xa9' is the UTF-8 text é.
 function decodeAnsiC(text) {
-  const bytes = [];
+  const chunks = [];
   for (const [token, byte, code] of text.matchAll(ANSI_C_TOKEN_RE)) {
     if (byte !== undefined) {
-      bytes.push(byte[0] === 'x' ? parseInt(byte.slice(1), 16) : parseInt(byte, 8) & 0xff);
+      chunks.push(Buffer.of(byte[0] === 'x' ? parseInt(byte.slice(1), 16) : parseInt(byte, 8) & 0xff));
     } else {
-      bytes.push(...Buffer.from(code === undefined ? token : ansiCEscape(code, token), 'utf8'));
+      chunks.push(Buffer.from(code === undefined ? token : ansiCEscape(code, token), 'utf8'));
     }
   }
-  return Buffer.from(bytes).toString('utf8');
+  try {
+    return UTF8.decode(Buffer.concat(chunks));
+  } catch {
+    return null;
+  }
 }
 
 // The shell word at `start`, up to an unquoted blank or operator character, with its quoting
-// removed, and whether any part of it was quoted. Null if a quote does not close.
+// removed, and whether any part of it was quoted. Null if a quote does not close. The word is
+// null when it holds bytes that are not UTF-8: no line of the command can then be equal to it.
 function readWord(command, start) {
   let word = '';
   let quote = null;
   let quoted = false;
+  let utf8 = true;
   let i = start;
   for (; i < command.length; i++) {
     const ch = command[i];
@@ -47,7 +55,9 @@ function readWord(command, start) {
       else word += ch;
     } else if (ansiC) {
       // $'...' decodes its escapes, so $'E\x4fF' is EOF
-      word += decodeAnsiC(ansiC[1]);
+      const decoded = decodeAnsiC(ansiC[1]);
+      if (decoded === null) utf8 = false;
+      else word += decoded;
       quoted = true;
       i += ansiC[0].length - 1;
     } else if (ch === "'" || ch === '"') {
@@ -65,7 +75,7 @@ function readWord(command, start) {
       word += ch;
     }
   }
-  return quote ? null : { word, quoted, end: i };
+  return quote ? null : { word: utf8 ? word : null, quoted, end: i };
 }
 
 // A here-document opener at `index`, but not a here-string (<<<): `<<` or `<<-`, then the
