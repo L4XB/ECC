@@ -21,6 +21,8 @@ REFERENCE_USAGE_RE = re.compile(
 BLANK_LINE_RE = re.compile(r"\n[ \t]*\r?\n")
 # -- what may come before a block on its line: indentation and block quote or list markers --
 CONTAINER_PREFIX_RE = re.compile(r"(?:[ \t]*(?:>|[-+*][ \t]|\d{1,9}[.)][ \t]))*[ \t]*")
+CONTAINER_MARKER_RE = re.compile(r"[ \t]*(?:>|[-+*][ \t]|\d{1,9}[.)][ \t])")
+ORDERED_MARKER_RE = re.compile(r"[ \t]*(\d{1,9})[.)]")
 LINK_TITLE_RE = re.compile(
     r'\s+(?:"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|\([^()]*\))\s*$'
 )
@@ -71,14 +73,23 @@ def _is_escaped(text: str, index: int) -> bool:
     return backslashes % 2 == 1
 
 
+def _continues_a_paragraph(text: str, line_start: int) -> bool:
+    """Whether the line at `line_start` follows a paragraph line, not a blank or list line."""
+    if line_start == 0:
+        return False
+    previous = text[text.rfind("\n", 0, line_start - 1) + 1 : line_start - 1]
+    return bool(previous.strip()) and not CONTAINER_MARKER_RE.match(previous)
+
+
 def _html_comment_end(text: str, start: int, closing: int, blank: int) -> int:
     """Where the comment that opens at `start` and closes at `closing` ends, or -1 if it is text.
 
     One that starts a block, after nothing but indentation and block quote or list markers on
     its line (as in `- <!--`), opens an HTML block. The block may span blank lines and takes the
-    rest of the line that holds its closer. One after text on its line is inline HTML, which
-    cannot outlast its paragraph, so when the first blank line after it, at `blank`, comes before
-    its closer, it is text.
+    rest of the line that holds its closer. A list that starts at a number other than 1 cannot
+    interrupt a paragraph, so after a paragraph line `2. <!--` is still paragraph text. One after
+    text on its line is inline HTML, which cannot outlast its paragraph, so when the first blank
+    line after it, at `blank`, comes before its closer, it is text.
     """
     # -- only the 64 characters before the opener are read, so a long line stays cheap --
     window = max(0, start - 64)
@@ -86,8 +97,14 @@ def _html_comment_end(text: str, start: int, closing: int, blank: int) -> int:
     if (line_start or not window) and CONTAINER_PREFIX_RE.fullmatch(
         text, line_start, start
     ):
-        newline = text.find("\n", closing + 3)
-        return len(text) if newline == -1 else newline
+        ordered = ORDERED_MARKER_RE.match(text, line_start, start)
+        if not (
+            ordered
+            and int(ordered.group(1)) != 1
+            and _continues_a_paragraph(text, line_start)
+        ):
+            newline = text.find("\n", closing + 3)
+            return len(text) if newline == -1 else newline
     return -1 if blank < closing else closing + 3
 
 
