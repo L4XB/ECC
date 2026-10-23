@@ -204,8 +204,9 @@ function validateCommitMessage(command) {
   const heredoc = messageMatch[1]?.startsWith('$(')
     ? heredocBody(command.slice(messageMatch.index + messageMatch[0].indexOf('"') + 1))
     : null;
-  // In double quotes, Bash drops a backslash-newline, a line continuation
-  const doubleQuoted = messageMatch[1]?.replace(/\\(\r?\n|[\s\S])/g, (escape, next) => (next.endsWith('\n') ? '' : escape));
+  // In double quotes, Bash drops the backslash before $ ` " \ and drops a backslash-newline,
+  // a line continuation, altogether. Before any other character the backslash stays.
+  const doubleQuoted = messageMatch[1]?.replace(/\\(\r?\n|[$`"\\])/g, (escape, next) => (next.endsWith('\n') ? '' : next));
   const message = heredoc ?? doubleQuoted ?? messageMatch[2] ?? messageMatch[3];
   // The format rules apply to the subject: git drops leading blank lines and trailing
   // whitespace, and the first line left is the subject.

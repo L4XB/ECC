@@ -495,7 +495,7 @@ if (test('captures full single-quoted -m message containing a double quote', () 
 if (test('captures full double-quoted -m message with escaped inner quotes (not truncated)', () => {
   const res = hook.validateCommitMessage('git commit -m "fix: say \\"hello\\" to the user"');
   assert.ok(res, 'expected a validation result');
-  assert.strictEqual(res.message, 'fix: say \\"hello\\" to the user');
+  assert.strictEqual(res.message, 'fix: say "hello" to the user');
 })) passed++; else failed++;
 
 if (test('measures length of the full message past an apostrophe (not the truncated prefix)', () => {
@@ -529,8 +529,10 @@ if (test('drops a line continuation from a double-quoted message, as Bash does',
   const res = hook.validateCommitMessage('git commit -m "\\\nfix: handle empty input"');
   assert.strictEqual(res.message, 'fix: handle empty input');
   assert.deepStrictEqual(res.issues, []);
-  // An escaped backslash before a newline is a backslash, and the newline stays
-  assert.strictEqual(hook.validateCommitMessage('git commit -m "fix: path C:\\\\\nbody"').message, 'fix: path C:\\\\\nbody');
+  // An escaped backslash before a newline is one backslash, and the newline stays
+  assert.strictEqual(hook.validateCommitMessage('git commit -m "fix: path C:\\\\\nbody"').message, 'fix: path C:\\\nbody');
+  // Bash removes the backslash only before $ ` " \ and a newline
+  assert.strictEqual(hook.validateCommitMessage('git commit -m "fix: cost \\$5 in \\d+ steps"').message, 'fix: cost $5 in \\d+ steps');
 })) passed++; else failed++;
 
 if (test('reads a here-document whose body has a backslash at the end of a line', () => {
