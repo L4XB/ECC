@@ -192,10 +192,11 @@ function heredocBody(value) {
  */
 function validateCommitMessage(command) {
   // Extract commit message from command (quote-aware: when quoted, capture to the
-  // matching closing quote, consuming escaped chars (\") so an embedded escaped
-  // quote does not truncate the subject, and allowing the OTHER quote char inside
-  // the body; when unquoted, capture the full remaining tail, not just the first token)
-  const messageMatch = command.match(/(?:-m|--message)[=\s]+(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^"']+?)\s*$)/);
+  // matching closing quote, consuming escaped chars (\", and a backslash before a
+  // newline) so an embedded escaped quote does not truncate the subject, and allowing
+  // the OTHER quote char inside the body; when unquoted, capture the full remaining
+  // tail, not just the first token)
+  const messageMatch = command.match(/(?:-m|--message)[=\s]+(?:"((?:\\[\s\S]|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^"']+?)\s*$)/);
   if (!messageMatch) return null;
   
   // A message written as -m "$(cat <<'EOF' ... EOF)", as Claude Code writes them, is the

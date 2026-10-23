@@ -525,6 +525,13 @@ if (test('still reports a bad subject inside a here-document', () => {
   assert.deepStrictEqual(res.issues.map(i => i.type), ['format', 'punctuation']);
 })) passed++; else failed++;
 
+if (test('reads a here-document whose body has a backslash at the end of a line', () => {
+  const res = hook.validateCommitMessage('git commit -m "$(cat <<\'EOF\'\nUpdate stuff.\n\nC:\\build\\\nEOF\n)"');
+  assert.ok(res, 'expected a validation result');
+  assert.strictEqual(res.message, 'Update stuff.\n\nC:\\build\\');
+  assert.deepStrictEqual(res.issues.map(i => i.type), ['format', 'punctuation']);
+})) passed++; else failed++;
+
 if (test('ends a here-document only at a line that holds just the delimiter', () => {
   const res = hook.validateCommitMessage(
     'git commit -m "$(cat <<\'EOF\'\nfix: keep reading\n\n  EOF\nEOF \nmore body\nEOF\n)"'
